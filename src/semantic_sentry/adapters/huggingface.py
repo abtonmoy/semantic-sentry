@@ -104,7 +104,7 @@ class HuggingFaceAdapter(SingleTowerAdapter):
 
         # Normalize
         if self._normalize:
-            embeddings = self._normalize(embeddings)
+            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
         return {self.tower_name: embeddings}
 

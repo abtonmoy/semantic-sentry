@@ -40,21 +40,44 @@ def nps(Z0: np.ndarray, Z1: np.ndarray, k: int = 10) -> float:
     return float(np.mean(per_point_scores))
 
 
+def _validate_input(Z0: np.ndarray, Z1: np.ndarray) -> None:
+    """Validate input matrices for NaN/Inf values.
+
+    Args:
+        Z0: First embedding matrix
+        Z1: Second embedding matrix
+
+    Raises:
+        ValueError: If inputs have invalid values
+    """
+    if np.any(np.isnan(Z0)) or np.any(np.isnan(Z1)):
+        raise ValueError("Input matrices contain NaN values")
+
+    if np.any(np.isinf(Z0)) or np.any(np.isinf(Z1)):
+        raise ValueError("Input matrices contain Inf values")
+
+
 def nps_per_point(Z0: np.ndarray, Z1: np.ndarray, k: int = 10) -> np.ndarray:
     """Compute per-point Neighborhood Preservation Scores.
-    
+
     Args:
         Z0: First embedding matrix of shape (n, d0)
         Z1: Second embedding matrix of shape (n, d1)
         k: Number of neighbors to consider (default: 10)
-        
+
     Returns:
         Array of per-point NPS scores of shape (n,)
+
+    Raises:
+        ValueError: If input matrices have different numbers of samples,
+                    or contain NaN/Inf values
     """
     if Z0.shape[0] != Z1.shape[0]:
         raise ValueError(
             f"Input matrices must have same number of samples, got {Z0.shape[0]} and {Z1.shape[0]}"
         )
+
+    _validate_input(Z0, Z1)
 
     n = Z0.shape[0]
     if n <= k + 1:

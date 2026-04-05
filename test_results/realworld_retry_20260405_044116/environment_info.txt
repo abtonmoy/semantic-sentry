@@ -1,0 +1,7 @@
+=== Environment Information ===
+Python 3.11.14
+numpy                  2.4.4
+sentence-transformers  5.3.0
+torch                  2.11.0
+transformers           5.5.0
+Linux wabashcs-NZXT 6.17.0-14-generic #14~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Thu Jan 15 15:52:10 UTC 2 x86_64 x86_64 x86_64 GNU/Linux

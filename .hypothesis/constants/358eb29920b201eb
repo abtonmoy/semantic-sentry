@@ -1,0 +1,4 @@
+# file: /home/wabashcs/abt/semantic_serenity/semantic-sentry/src/semantic_sentry/core/snapshot.py
+# hypothesis_version: 6.151.10
+
+['Snapshot', '__', 'anchor_set_version', 'checkpoint_hash', 'embeddings_hash', 'encoder', 'metadata', 'metadata.json', 'model_id', 'np', 'timestamp', 'tower_count', 'tower_names', 'w']

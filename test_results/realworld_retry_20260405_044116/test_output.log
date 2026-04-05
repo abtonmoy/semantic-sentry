@@ -1,0 +1,28 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0 -- /home/wabashcs/abt/semantic_serenity/semantic-sentry/.venv/bin/python3
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /home/wabashcs/abt/semantic_serenity/semantic-sentry
+configfile: pyproject.toml
+plugins: hypothesis-6.151.10, timeout-2.4.0, anyio-4.13.0, cov-7.1.0
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 3 items
+
+tests/stress/test_real_world.py::TestRealWorld::test_real_001_bert_base PASSED [ 33%]
+tests/stress/test_real_world.py::TestRealWorld::test_real_003_sentence_transformer PASSED [ 66%]
+tests/stress/test_real_world.py::TestRealWorld::test_real_012_different_dims_raises PASSED [100%]
+
+=============================== warnings summary ===============================
+tests/stress/test_real_world.py::TestRealWorld::test_real_001_bert_base
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+tests/stress/test_real_world.py::TestRealWorld::test_real_001_bert_base
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+tests/stress/test_real_world.py::TestRealWorld::test_real_001_bert_base
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 3 passed, 3 warnings in 4.78s =========================

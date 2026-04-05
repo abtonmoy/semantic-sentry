@@ -9,12 +9,15 @@ from semantic_sentry.adapters import detect_adapter
 from semantic_sentry.adapters.base import EncoderAdapter
 from semantic_sentry.core.comparison import Comparison
 from semantic_sentry.core.snapshot import Snapshot
+from semantic_sentry.core.classification import ClassificationResult, ConfidenceLevel
 from semantic_sentry.exceptions import (
     AdapterDetectionError,
     AnchorSetMismatchError,
     EmbeddingDimError,
+    NoComparisonError,
     TowerMismatchError,
 )
+from semantic_sentry.metrics.nps import nps_per_point
 from semantic_sentry.metrics.registry import get_metric_registry
 from semantic_sentry.probes.anchor_set import AnchorSet
 
@@ -37,6 +40,9 @@ class DriftMonitor:
         """Initialize the drift monitor."""
         self._metric_registry = get_metric_registry()
         self._last_comparison: Comparison | None = None
+        self._last_anchor_set: AnchorSet | None = None
+        self._last_v0_embeddings: dict[str, np.ndarray] | None = None
+        self._last_v1_embeddings: dict[str, np.ndarray] | None = None
 
     def snapshot(
         self,
@@ -193,6 +199,8 @@ class DriftMonitor:
 
         # Store for later use
         self._last_comparison = comparison
+        self._last_v0_embeddings = {name: snapshot_v0.get_tower(name).copy() for name in snapshot_v0.tower_names}
+        self._last_v1_embeddings = {name: snapshot_v1.get_tower(name).copy() for name in snapshot_v1.tower_names}
 
         return comparison
 
@@ -266,10 +274,10 @@ class DriftMonitor:
 
     def _get_model_id(self, model: Any) -> str:
         """Get a model identifier.
-        
+
         Args:
             model: Model instance
-            
+
         Returns:
             Model ID string
         """
@@ -279,3 +287,168 @@ class DriftMonitor:
             return model.__class__.__name__
         else:
             return "unknown_model"
+
+    def classify(
+        self,
+        input_data: list,
+        model: Any,
+        anchor_set: AnchorSet,
+        adapter: EncoderAdapter | None = None,
+        k: int = 10
+    ) -> ClassificationResult:
+        """Classify input data with drift-aware confidence.
+
+        Args:
+            input_data: List of inputs to classify
+            model: Model to use for encoding
+            anchor_set: Anchor set with known labels
+            adapter: Optional adapter (auto-detected if not provided)
+            k: Number of nearest neighbors to consider
+
+        Returns:
+            Classification result with confidence level
+
+        Raises:
+            NoComparisonError: If no comparison has been run yet
+        """
+        if self._last_comparison is None:
+            raise NoComparisonError("Must call compare() before classify()")
+
+        # Auto-detect adapter if not provided
+        if adapter is None:
+            adapter = detect_adapter(model)
+
+        # Encode input data
+        input_embeddings = adapter.encode_numpy(input_data)
+        tower_name = adapter.list_towers()[0]
+        Z_input = input_embeddings[tower_name]
+
+        # Get anchor embeddings from v1 (the "new" model)
+        Z_anchor = self._last_v1_embeddings[tower_name]
+
+        # Compute per-point NPS for local drift detection
+        nps_scores = nps_per_point(
+            np.vstack([Z_anchor, Z_input]),
+            np.vstack([Z_anchor, Z_input]),
+            k=min(k, Z_anchor.shape[0] + Z_input.shape[0] - 1)
+        )
+
+        # Get local NPS for the input point (last one)
+        local_nps = float(nps_scores[-1])
+
+        # Find k nearest anchor points
+        similarities = Z_input[0] @ Z_anchor.T  # Cosine similarity (already normalized)
+        nearest_indices = np.argsort(-similarities)[:k]
+        nearest_distances = 1 - similarities[nearest_indices]  # Convert to distance
+
+        # Get labels of nearest anchors
+        nearest_labels = [anchor_set.labels[int(i)] for i in nearest_indices]
+
+        # Majority vote for classification
+        from collections import Counter
+        label_counts = Counter(nearest_labels)
+        predicted_label = label_counts.most_common(1)[0][0]
+
+        # Determine confidence level
+        if local_nps > 0.90:
+            confidence = ConfidenceLevel.HIGH
+        elif local_nps > 0.80:
+            confidence = ConfidenceLevel.MEDIUM
+        else:
+            confidence = ConfidenceLevel.LOW
+
+        # Generate drift warning if needed
+        drift_warning = ""
+        if confidence != ConfidenceLevel.HIGH:
+            drift_warning = f"Drift detected: local NPS = {local_nps:.3f}"
+
+        return ClassificationResult(
+            label=predicted_label,
+            confidence=confidence,
+            local_nps=local_nps,
+            drift_warning=drift_warning,
+            nearest_anchor_indices=tuple(int(i) for i in nearest_indices),
+            nearest_anchor_distances=tuple(float(d) for d in nearest_distances),
+        )
+
+    def classify_batch(
+        self,
+        input_data: list,
+        model: Any,
+        anchor_set: AnchorSet,
+        adapter: EncoderAdapter | None = None,
+        k: int = 10
+    ) -> list[ClassificationResult]:
+        """Classify a batch of inputs with drift-aware confidence.
+
+        Args:
+            input_data: List of inputs to classify
+            model: Model to use for encoding
+            anchor_set: Anchor set with known labels
+            adapter: Optional adapter (auto-detected if not provided)
+            k: Number of nearest neighbors to consider
+
+        Returns:
+            List of classification results
+
+        Raises:
+            NoComparisonError: If no comparison has been run yet
+        """
+        if self._last_comparison is None:
+            raise NoComparisonError("Must call compare() before classify_batch()")
+
+        # Auto-detect adapter if not provided
+        if adapter is None:
+            adapter = detect_adapter(model)
+
+        # Encode all input data at once
+        input_embeddings = adapter.encode_numpy(input_data)
+        tower_name = adapter.list_towers()[0]
+        Z_inputs = input_embeddings[tower_name]
+
+        # Get anchor embeddings from v1
+        Z_anchor = self._last_v1_embeddings[tower_name]
+
+        # Compute similarities for all inputs at once
+        similarities = Z_inputs @ Z_anchor.T  # (n_inputs, n_anchors)
+
+        results = []
+        for i, sims in enumerate(similarities):
+            nearest_indices = np.argsort(-sims)[:k]
+            nearest_distances = 1 - sims[nearest_indices]
+
+            # Get labels of nearest anchors
+            nearest_labels = [anchor_set.labels[int(idx)] for idx in nearest_indices]
+
+            # Majority vote
+            from collections import Counter
+            label_counts = Counter(nearest_labels)
+            predicted_label = label_counts.most_common(1)[0][0]
+
+            # Compute local NPS for this point
+            Z_combined = np.vstack([Z_anchor, Z_inputs[i:i+1]])
+            nps_scores = nps_per_point(Z_combined, Z_combined, k=min(k, Z_combined.shape[0] - 1))
+            local_nps = float(nps_scores[-1])
+
+            # Determine confidence
+            if local_nps > 0.90:
+                confidence = ConfidenceLevel.HIGH
+            elif local_nps > 0.80:
+                confidence = ConfidenceLevel.MEDIUM
+            else:
+                confidence = ConfidenceLevel.LOW
+
+            drift_warning = ""
+            if confidence != ConfidenceLevel.HIGH:
+                drift_warning = f"Drift detected: local NPS = {local_nps:.3f}"
+
+            results.append(ClassificationResult(
+                label=predicted_label,
+                confidence=confidence,
+                local_nps=local_nps,
+                drift_warning=drift_warning,
+                nearest_anchor_indices=tuple(int(idx) for idx in nearest_indices),
+                nearest_anchor_distances=tuple(float(d) for d in nearest_distances),
+            ))
+
+        return results

@@ -3,24 +3,45 @@
 import numpy as np
 
 
+def _validate_input(Z: np.ndarray) -> None:
+    """Validate input matrix for NaN/Inf values.
+
+    Args:
+        Z: Embedding matrix
+
+    Raises:
+        ValueError: If input has invalid values
+    """
+    if np.any(np.isnan(Z)):
+        raise ValueError("Input matrix contains NaN values")
+
+    if np.any(np.isinf(Z)):
+        raise ValueError("Input matrix contains Inf values")
+
+
 def isotropy(Z: np.ndarray) -> float:
     """Compute isotropy of an embedding space.
-    
+
     Isotropy measures how uniformly distributed an embedding space is
     across all dimensions. A perfectly isotropic space has singular
     values that are all equal. Anisotropic spaces have dominant directions.
-    
+
     Algorithm:
         1. Center Z
         2. Compute SVD: U, S, Vt = svd(Z_centered, full_matrices=False)
         3. Return S[-1] / S[0] (smallest / largest singular value)
-    
+
     Args:
         Z: Embedding matrix of shape (n, d)
-        
+
     Returns:
         Isotropy score in [0, 1], where 1 means perfectly isotropic
+
+    Raises:
+        ValueError: If input contains NaN/Inf values
     """
+    _validate_input(Z)
+
     # Center the embeddings
     Z_centered = Z - Z.mean(axis=0, keepdims=True)
 

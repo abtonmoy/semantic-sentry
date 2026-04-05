@@ -1,0 +1,4 @@
+# file: /home/wabashcs/abt/semantic_serenity/semantic-sentry/src/semantic_sentry/core/monitor.py
+# hypothesis_version: 6.151.10
+
+[0.0, 1e-09, '__class__', 'name_or_path', 'parameters', 'state_dict', 'unknown_model']

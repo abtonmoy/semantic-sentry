@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 import torch
 
 from semantic_sentry.adapters.base import EncoderAdapter
@@ -45,10 +46,10 @@ class CustomAdapter(EncoderAdapter):
 
     def encode(self, inputs: Any) -> dict[str, torch.Tensor]:
         """Encode inputs using the custom function.
-        
+
         Args:
             inputs: Input data
-            
+
         Returns:
             Dict mapping tower name to embedding tensor
         """
@@ -57,6 +58,14 @@ class CustomAdapter(EncoderAdapter):
         # Handle single tensor output
         if isinstance(result, torch.Tensor):
             result = {self._tower_names[0]: result}
+        elif isinstance(result, np.ndarray):
+            result = {self._tower_names[0]: torch.from_numpy(result)}
+
+        # Convert numpy arrays to tensors if needed
+        result = {
+            name: torch.from_numpy(tensor) if isinstance(tensor, np.ndarray) else tensor
+            for name, tensor in result.items()
+        }
 
         # Normalize if requested
         if self._normalize:

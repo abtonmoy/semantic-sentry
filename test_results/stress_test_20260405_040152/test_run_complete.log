@@ -1,0 +1,126 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0 -- /home/wabashcs/abt/semantic_serenity/semantic-sentry/.venv/bin/python3
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /home/wabashcs/abt/semantic_serenity/semantic-sentry
+configfile: pyproject.toml
+plugins: hypothesis-6.151.10, timeout-2.4.0, anyio-4.13.0, cov-7.1.0
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 62 items
+
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_001_identical_matrices PASSED [  1%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_002_rank_deficient PASSED [  3%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_003_orthogonal_invariance PASSED [  4%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_004_very_different_matrices PASSED [  6%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_005_zero_matrix PASSED [  8%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_006_single_sample PASSED [  9%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_007_high_condition_number PASSED [ 11%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_property_symmetry PASSED [ 12%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_008_large_dimensions PASSED [ 14%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_009_partial_overlap PASSED [ 16%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_010_different_sample_counts_raises PASSED [ 17%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_001_self_comparison PASSED [ 19%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_002_k_greater_than_n PASSED [ 20%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_003_identical_rows PASSED [ 22%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_004_random_permutation PASSED [ 24%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_005_monotonic_perturbation PASSED [ 25%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_006_large_n_small_k PASSED [ 27%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_007_per_point_scores_shape PASSED [ 29%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_008_small_k_edge_case PASSED [ 30%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_009_very_high_dimensional PASSED [ 32%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_010_different_dimensions PASSED [ 33%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_001_spherical_gaussian PASSED [ 35%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_002_rank_1 PASSED [ 37%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_003_square_matrix PASSED [ 38%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_004_tall_matrix PASSED [ 40%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_005_wide_matrix PASSED [ 41%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_006_delta_same_matrix PASSED [ 43%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_007_delta_different_isotropy PASSED [ 45%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_008_effective_dim_full PASSED [ 46%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_009_effective_dim_rank_deficient PASSED [ 48%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_010_effective_dim_tall PASSED [ 50%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_001_nan_values FAILED [ 51%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_002_inf_values FAILED [ 53%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_003_all_zeros PASSED [ 54%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_004_very_large_values PASSED [ 56%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_005_very_small_values PASSED [ 58%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_006_empty_anchor_set PASSED [ 59%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_007_single_sample_anchor PASSED [ 61%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_008_mixed_precision PASSED [ 62%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_009_negative_zero PASSED [ 64%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_010_subnormal_values PASSED [ 66%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_001_rotation_attack PASSED [ 67%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_002_scaling_attack PASSED [ 69%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_003_permutation_attack PASSED [ 70%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_004_gaussian_noise_injection FAILED [ 72%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_005_outlier_injection PASSED [ 74%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_006_truncated_snapshot PASSED [ 75%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_007_modified_hash FAILED [ 77%]
+tests/stress/test_concurrency.py::TestConcurrency::test_thr_001_concurrent_register PASSED [ 79%]
+tests/stress/test_concurrency.py::TestConcurrency::test_thr_002_concurrent_compute PASSED [ 80%]
+tests/stress/test_concurrency.py::TestConcurrency::test_thr_003_register_during_compute PASSED [ 82%]
+tests/stress/test_concurrency.py::TestConcurrency::test_thr_004_parallel_metric_computation FAILED [ 83%]
+tests/stress/test_transfer_stress.py::TestTransferStress::test_trf_001_r_squared_synthetic PASSED [ 85%]
+tests/stress/test_transfer_stress.py::TestTransferStress::test_trf_nps_bound_identity PASSED [ 87%]
+tests/stress/test_transfer_stress.py::TestTransferStress::test_trf_nps_bound_half PASSED [ 88%]
+tests/stress/test_transfer_stress.py::TestTransferStress::test_trf_predict_before_fit PASSED [ 90%]
+tests/stress/test_transfer_stress.py::TestTransferStress::test_trf_upper_bound PASSED [ 91%]
+tests/stress/test_transfer_stress.py::TestTransferStress::test_trf_confidence_interval PASSED [ 93%]
+tests/stress/test_transfer_stress.py::TestTransferStress::test_trf_fit_insufficient_samples PASSED [ 95%]
+tests/stress/test_transfer_stress.py::TestTransferStress::test_trf_length_mismatch PASSED [ 96%]
+tests/stress/test_transfer_stress.py::TestTransferStress::test_trf_prediction_clamped PASSED [ 98%]
+tests/stress/test_transfer_stress.py::TestTransferStress::test_trf_feature_importance PASSED [100%]
+
+=================================== FAILURES ===================================
+___________________ TestDataQuality.test_dqa_001_nan_values ____________________
+tests/stress/test_data_quality.py:20: in test_dqa_001_nan_values
+    with pytest.raises((ValueError, RuntimeError)):
+E   Failed: DID NOT RAISE any of (<class 'ValueError'>, <class 'RuntimeError'>)
+___________________ TestDataQuality.test_dqa_002_inf_values ____________________
+tests/stress/test_data_quality.py:27: in test_dqa_002_inf_values
+    with pytest.raises((ValueError, RuntimeError)):
+E   Failed: DID NOT RAISE any of (<class 'ValueError'>, <class 'RuntimeError'>)
+____________ TestAdversarial.test_adv_004_gaussian_noise_injection _____________
+tests/stress/test_adversarial.py:60: in test_adv_004_gaussian_noise_injection
+    assert cka_val < 0.95, f"CKA should detect noise, got {cka_val}"
+E   AssertionError: CKA should detect noise, got 1.0
+E   assert 1.0 < 0.95
+__________________ TestAdversarial.test_adv_007_modified_hash __________________
+tests/stress/test_adversarial.py:114: in test_adv_007_modified_hash
+    with pytest.raises(SnapshotCorruptionError):
+E   Failed: DID NOT RAISE <class 'semantic_sentry.exceptions.SnapshotCorruptionError'>
+___________ TestConcurrency.test_thr_004_parallel_metric_computation ___________
+tests/stress/test_concurrency.py:116: in test_thr_004_parallel_metric_computation
+    assert par_time <= seq_time * 1.5, f"Parallel was {par_time:.3f}s, sequential was {seq_time:.3f}s"
+E   AssertionError: Parallel was 0.068s, sequential was 0.031s
+E   assert 0.06796550005674362 <= (0.030934151029214263 * 1.5)
+=============================== warnings summary ===============================
+<frozen importlib._bootstrap>:241
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+<frozen importlib._bootstrap>:241
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+<frozen importlib._bootstrap>:241
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_002_inf_values
+  /home/wabashcs/abt/semantic_serenity/semantic-sentry/src/semantic_sentry/metrics/cka.py:35: RuntimeWarning: invalid value encountered in subtract
+    Z0_centered = Z0 - Z0.mean(axis=0, keepdims=True)
+
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_002_inf_values
+  /home/wabashcs/abt/semantic_serenity/semantic-sentry/src/semantic_sentry/metrics/cka.py:36: RuntimeWarning: invalid value encountered in subtract
+    Z1_centered = Z1 - Z1.mean(axis=0, keepdims=True)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/stress/test_data_quality.py::TestDataQuality::test_dqa_001_nan_values - Failed: DID NOT RAISE any of (<class 'ValueError'>, <class 'RuntimeError'>)
+FAILED tests/stress/test_data_quality.py::TestDataQuality::test_dqa_002_inf_values - Failed: DID NOT RAISE any of (<class 'ValueError'>, <class 'RuntimeError'>)
+FAILED tests/stress/test_adversarial.py::TestAdversarial::test_adv_004_gaussian_noise_injection - AssertionError: CKA should detect noise, got 1.0
+assert 1.0 < 0.95
+FAILED tests/stress/test_adversarial.py::TestAdversarial::test_adv_007_modified_hash - Failed: DID NOT RAISE <class 'semantic_sentry.exceptions.SnapshotCorruptionError'>
+FAILED tests/stress/test_concurrency.py::TestConcurrency::test_thr_004_parallel_metric_computation - AssertionError: Parallel was 0.068s, sequential was 0.031s
+assert 0.06796550005674362 <= (0.030934151029214263 * 1.5)
+=================== 5 failed, 57 passed, 5 warnings in 5.88s ===================

@@ -172,6 +172,17 @@ class Snapshot:
                     f"got {computed_hash}"
                 )
 
+        # Integrity check for checkpoint_hash (if present in metadata)
+        if "checkpoint_hash" in metadata:
+            stored_checkpoint_hash = metadata["checkpoint_hash"]
+            # The checkpoint_hash cannot be recomputed from the snapshot alone
+            # (it requires the original model), so we just verify it's present
+            # and not obviously tampered with (non-empty)
+            if not stored_checkpoint_hash:
+                raise SnapshotCorruptionError(
+                    f"Invalid checkpoint_hash in metadata: {stored_checkpoint_hash}"
+                )
+
         snapshot = cls(
             model_id=metadata["model_id"],
             checkpoint_hash=metadata["checkpoint_hash"],

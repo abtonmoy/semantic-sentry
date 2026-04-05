@@ -45,6 +45,8 @@ testpaths = ["tests"]
 markers = [
     "unit: Unit tests (no external dependencies)",
     "integration: Integration tests (may download models)",
+    "stress: Stress tests (extensive, synthetic)",
+    "real_world: Real-world model tests (downloads models, SLOW)",
     "slow: Tests that take >30 seconds",
     "gpu: Tests requiring GPU",
 ]

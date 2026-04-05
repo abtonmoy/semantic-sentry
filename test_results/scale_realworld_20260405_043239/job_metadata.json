@@ -1,0 +1,31 @@
+{
+  "job_id": "scale_realworld_20260405_043239",
+  "timestamp": "2026-04-05T04:32:39Z",
+  "test_type": "scale_and_realworld",
+  "tests": [
+    "tests/stress/test_scale.py",
+    "tests/stress/test_real_world.py"
+  ],
+  "status": "completed",
+  "results": {
+    "scale_tests": {
+      "test_scl_metric_performance[1000-128-1.0]": "PASSED",
+      "test_scl_metric_performance[10000-512-5.0]": "PASSED",
+      "test_scl_metric_performance[100000-1024-30.0]": "TIMEOUT/INTERRUPTED",
+      "test_memory_leak_snapshot_cycle": "FAILED - Memory grew 27526x",
+      "test_scl_cka_scaling": "PASSED",
+      "test_scl_nps_scaling": "PASSED"
+    },
+    "real_world_tests": {
+      "test_real_001_bert_base": "FAILED - TypeError: 'bool' object is not callable (BUG IN HuggingFaceAdapter)",
+      "test_real_003_sentence_transformer": "FAILED - ModuleNotFoundError: sentence_transformers not installed",
+      "test_real_012_different_dims_raises": "PASSED"
+    }
+  },
+  "notes": [
+    "Scale test with 100K samples x 1024 dims hit timeout (30s limit)",
+    "Memory leak test shows significant growth - needs investigation",
+    "HuggingFaceAdapter bug: _normalize boolean shadowing method call - FIXED",
+    "sentence_transformers not installed in current environment"
+  ]
+}

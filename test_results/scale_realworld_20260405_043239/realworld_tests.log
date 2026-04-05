@@ -1,0 +1,68 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0 -- /home/wabashcs/abt/semantic_serenity/semantic-sentry/.venv/bin/python3
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /home/wabashcs/abt/semantic_serenity/semantic-sentry
+configfile: pyproject.toml
+plugins: hypothesis-6.151.10, timeout-2.4.0, anyio-4.13.0, cov-7.1.0
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 3 items
+
+tests/stress/test_real_world.py::TestRealWorld::test_real_001_bert_base FAILED [ 33%]
+tests/stress/test_real_world.py::TestRealWorld::test_real_003_sentence_transformer FAILED [ 66%]
+tests/stress/test_real_world.py::TestRealWorld::test_real_012_different_dims_raises PASSED [100%]
+
+=================================== FAILURES ===================================
+____________________ TestRealWorld.test_real_001_bert_base _____________________
+tests/stress/test_real_world.py:30: in test_real_001_bert_base
+    snap = monitor.snapshot(model=model, anchor_set=anchor_set, adapter=adapter)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/semantic_sentry/core/monitor.py:76: in snapshot
+    embeddings_dict = adapter.encode_numpy(anchor_set.inputs)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/semantic_sentry/adapters/base.py:53: in encode_numpy
+    tensors = self.encode(inputs)
+              ^^^^^^^^^^^^^^^^^^^
+src/semantic_sentry/adapters/huggingface.py:107: in encode
+    embeddings = self._normalize(embeddings)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: 'bool' object is not callable
+----------------------------- Captured stderr call -----------------------------
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 6765.50it/s]
+[1mBertModel LOAD REPORT[0m from: bert-base-uncased
+Key                                        | Status     |  | 
+-------------------------------------------+------------+--+-
+cls.predictions.transform.dense.bias       | UNEXPECTED |  | 
+cls.seq_relationship.weight                | UNEXPECTED |  | 
+cls.predictions.transform.LayerNorm.weight | UNEXPECTED |  | 
+cls.predictions.transform.LayerNorm.bias   | UNEXPECTED |  | 
+cls.predictions.transform.dense.weight     | UNEXPECTED |  | 
+cls.predictions.bias                       | UNEXPECTED |  | 
+cls.seq_relationship.bias                  | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+------------------------------ Captured log call -------------------------------
+WARNING  huggingface_hub.utils._http:_http.py:916 Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+_______________ TestRealWorld.test_real_003_sentence_transformer _______________
+tests/stress/test_real_world.py:37: in test_real_003_sentence_transformer
+    from sentence_transformers import SentenceTransformer
+E   ModuleNotFoundError: No module named 'sentence_transformers'
+=============================== warnings summary ===============================
+tests/stress/test_real_world.py::TestRealWorld::test_real_001_bert_base
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+tests/stress/test_real_world.py::TestRealWorld::test_real_001_bert_base
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+tests/stress/test_real_world.py::TestRealWorld::test_real_001_bert_base
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/stress/test_real_world.py::TestRealWorld::test_real_001_bert_base - TypeError: 'bool' object is not callable
+FAILED tests/stress/test_real_world.py::TestRealWorld::test_real_003_sentence_transformer - ModuleNotFoundError: No module named 'sentence_transformers'
+=================== 2 failed, 1 passed, 3 warnings in 2.87s ====================

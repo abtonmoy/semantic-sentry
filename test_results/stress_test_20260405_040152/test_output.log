@@ -1,0 +1,71 @@
+   Building semantic-sentry @ file:///home/wabashcs/abt/semantic_serenity/semantic-sentry
+      Built semantic-sentry @ file:///home/wabashcs/abt/semantic_serenity/semantic-sentry
+Uninstalled 1 package in 0.42ms
+Installed 1 package in 0.41ms
+============================= test session starts ==============================
+platform linux -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0 -- /home/wabashcs/abt/semantic_serenity/semantic-sentry/.venv/bin/python3
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /home/wabashcs/abt/semantic_serenity/semantic-sentry
+configfile: pyproject.toml
+plugins: hypothesis-6.151.10, timeout-2.4.0, anyio-4.13.0, cov-7.1.0
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 72 items / 3 deselected / 69 selected
+
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_001_rotation_attack PASSED [  1%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_002_scaling_attack PASSED [  2%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_003_permutation_attack PASSED [  4%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_004_gaussian_noise_injection FAILED [  5%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_005_outlier_injection PASSED [  7%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_006_truncated_snapshot PASSED [  8%]
+tests/stress/test_adversarial.py::TestAdversarial::test_adv_007_modified_hash FAILED [ 10%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_001_identical_matrices PASSED [ 11%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_002_rank_deficient PASSED [ 13%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_003_orthogonal_invariance PASSED [ 14%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_004_very_different_matrices PASSED [ 15%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_005_zero_matrix PASSED [ 17%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_006_single_sample PASSED [ 18%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_007_high_condition_number PASSED [ 20%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_property_symmetry PASSED [ 21%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_008_large_dimensions PASSED [ 23%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_009_partial_overlap PASSED [ 24%]
+tests/stress/test_cka_stress.py::TestCKAStress::test_cka_010_different_sample_counts_raises PASSED [ 26%]
+tests/stress/test_concurrency.py::TestConcurrency::test_thr_001_concurrent_register PASSED [ 27%]
+tests/stress/test_concurrency.py::TestConcurrency::test_thr_002_concurrent_compute PASSED [ 28%]
+tests/stress/test_concurrency.py::TestConcurrency::test_thr_003_register_during_compute PASSED [ 30%]
+tests/stress/test_concurrency.py::TestConcurrency::test_thr_004_parallel_metric_computation PASSED [ 31%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_001_nan_values FAILED [ 33%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_002_inf_values FAILED [ 34%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_003_all_zeros PASSED [ 36%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_004_very_large_values PASSED [ 37%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_005_very_small_values PASSED [ 39%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_006_empty_anchor_set PASSED [ 40%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_007_single_sample_anchor PASSED [ 42%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_008_mixed_precision PASSED [ 43%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_009_negative_zero PASSED [ 44%]
+tests/stress/test_data_quality.py::TestDataQuality::test_dqa_010_subnormal_values PASSED [ 46%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_001_spherical_gaussian PASSED [ 47%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_002_rank_1 PASSED [ 49%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_003_square_matrix PASSED [ 50%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_004_tall_matrix PASSED [ 52%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_005_wide_matrix PASSED [ 53%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_006_delta_same_matrix PASSED [ 55%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_007_delta_different_isotropy PASSED [ 56%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_008_effective_dim_full PASSED [ 57%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_009_effective_dim_rank_deficient PASSED [ 59%]
+tests/stress/test_isotropy_stress.py::TestIsotropyStress::test_iso_010_effective_dim_tall PASSED [ 60%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_001_self_comparison PASSED [ 62%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_002_k_greater_than_n PASSED [ 63%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_003_identical_rows PASSED [ 65%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_004_random_permutation PASSED [ 66%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_005_monotonic_perturbation PASSED [ 68%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_006_large_n_small_k PASSED [ 69%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_007_per_point_scores_shape PASSED [ 71%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_008_small_k_edge_case PASSED [ 72%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_009_very_high_dimensional PASSED [ 73%]
+tests/stress/test_nps_stress.py::TestNPSStress::test_nps_010_different_dimensions PASSED [ 75%]
+tests/stress/test_scale.py::TestScale::test_scl_metric_performance[1000-128-1.0] PASSED [ 76%]
+tests/stress/test_scale.py::TestScale::test_scl_metric_performance[10000-512-5.0] PASSED [ 78%]
+tests/stress/test_scale.py::TestScale::test_scl_metric_performance[100000-1024-30.0] 

@@ -1,0 +1,28 @@
+{
+  "job_id": "stress_test_20260405_040152",
+  "timestamp": "2026-04-05T04:01:52Z",
+  "test_type": "stress",
+  "excluded_tests": [
+    "test_classification_stress.py",
+    "test_real_world.py",
+    "test_scale.py"
+  ],
+  "pytest_args": [
+    "tests/stress/test_cka_stress.py",
+    "tests/stress/test_nps_stress.py",
+    "tests/stress/test_isotropy_stress.py",
+    "tests/stress/test_data_quality.py",
+    "tests/stress/test_adversarial.py",
+    "tests/stress/test_concurrency.py",
+    "tests/stress/test_transfer_stress.py",
+    "--timeout=300",
+    "--tb=short"
+  ],
+  "status": "completed",
+  "results": {
+    "total": 62,
+    "passed": 57,
+    "failed": 5,
+    "skipped": 0
+  }
+}
