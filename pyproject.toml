@@ -1,0 +1,65 @@
+[project]
+name = "semantic-sentry"
+version = "0.1.0"
+description = "Universal semantic drift detection for any embedding space"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+authors = [{name = "Abdul Basit Tonmoy", email = "atonmoy27@wabash.edu"}]
+
+dependencies = [
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "faiss-cpu>=1.7.4",
+    "safetensors>=0.4.0",
+    "transformers>=4.35.0",
+    "tqdm>=4.65.0",
+]
+
+[project.optional-dependencies]
+clip = ["open-clip-torch>=2.20.0", "Pillow>=10.0.0"]
+sentence-transformers = ["sentence-transformers>=2.2.0"]
+onnx = ["onnxruntime>=1.16.0"]
+wandb = ["wandb>=0.16.0"]
+mlflow = ["mlflow>=2.8.0"]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-timeout>=2.2.0",
+    "hypothesis>=6.90.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+]
+all = ["semantic-sentry[clip,sentence-transformers,onnx,wandb,mlflow,dev]"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/semantic_sentry"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: Unit tests (no external dependencies)",
+    "integration: Integration tests (may download models)",
+    "slow: Tests that take >30 seconds",
+    "gpu: Tests requiring GPU",
+]
+addopts = "-v --tb=short --strict-markers"
+timeout = 120
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "TCH"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true

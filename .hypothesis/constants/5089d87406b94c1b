@@ -1,0 +1,4 @@
+# file: /home/wabashcs/abt/semantic_serenity/semantic-sentry/src/semantic_sentry/core/classification.py
+# hypothesis_version: 6.151.10
+
+[0.8, 0.9, 'confidence', 'drift_warning', 'high', 'low', 'medium']
