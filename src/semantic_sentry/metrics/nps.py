@@ -123,25 +123,35 @@ def _l2_normalize(X: np.ndarray) -> np.ndarray:
 
 def _get_knn_indices(X: np.ndarray, k: int) -> np.ndarray:
     """Get k-nearest neighbor indices using FAISS or numpy.
-    
+
     Args:
         X: L2-normalized matrix of shape (n, d)
         k: Number of neighbors to find
-        
+
     Returns:
         Array of shape (n, k) with neighbor indices
     """
     n = X.shape[0]
 
     if FAISS_AVAILABLE and n > 1000:
-        # Use FAISS for larger datasets
+        # Use FAISS for larger datasets with optimized batching
         d = X.shape[1]
         index = faiss.IndexFlatIP(d)  # Inner product index
         index.add(X.astype(np.float32))
 
-        # Search k nearest neighbors
-        _, indices = index.search(X.astype(np.float32), k)
-        return indices
+        # For very large datasets, search in batches to avoid memory issues
+        if n > 50000:
+            batch_size = 10000
+            all_indices = []
+            for i in range(0, n, batch_size):
+                batch = X[i:min(i+batch_size, n)].astype(np.float32)
+                _, indices = index.search(batch, k)
+                all_indices.append(indices)
+            return np.vstack(all_indices)
+        else:
+            # Search k nearest neighbors
+            _, indices = index.search(X.astype(np.float32), k)
+            return indices
     else:
         # Use numpy for smaller datasets
         # Compute pairwise dot products (cosine similarity since X is normalized)

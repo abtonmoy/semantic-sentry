@@ -1,0 +1,4 @@
+# file: /home/wabashcs/abt/semantic_serenity/semantic-sentry/src/semantic_sentry/adapters/huggingface.py
+# hypothesis_version: 6.151.10
+
+[1e-09, 512, 'attention_mask', 'cls', 'encoder', 'last', 'mean', 'pt']
