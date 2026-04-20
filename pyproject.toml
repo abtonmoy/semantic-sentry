@@ -15,6 +15,8 @@ dependencies = [
     "safetensors>=0.4.0",
     "transformers>=4.35.0",
     "tqdm>=4.65.0",
+    "beir>=2.2.0",
+    "mteb>=2.12.23",
 ]
 
 [project.optional-dependencies]
