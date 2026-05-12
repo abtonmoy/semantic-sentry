@@ -1,201 +1,510 @@
-# SemanticSentry — Library Enhancement: Additional Drift Metrics
+# SemanticSentry — Library Enhancement (v2)
 
-Current metrics cover three axes: **CKA** (global structural similarity), **NPS** (local neighborhood retention), **Isotropy Δ** (spectral shape). This document tracks candidate metrics to extend coverage along axes the current set misses.
+Comprehensive metric and infrastructure expansion. Every item below earns its slot for at least one of:
 
-## Gaps in current coverage
+- **[paper]** — supports a §3 / §4 / §7 claim, or helps close §3.3
+- **[lib]** — broadens analytical coverage, hardens diagnostics
+- **[mlops]** — deployment monitoring, CI/CD gating, alerting
+- **[research]** — post-v1.0.0 paper, deferred experiments (§7.3, §7.4)
 
-The existing three are good but leave four blind spots:
-
-1. **No magnitude in original units.** CKA is a unitless similarity — it tells you "are these similar?" but not "by how much did embeddings move?"
-2. **No directionality on local drift.** NPS collapses two different failure modes (false-neighbors introduced vs true-neighbors lost) into one number.
-3. **No distributional view.** None of the current metrics check whether the marginal embedding distribution has shifted (e.g., scale-only drift from quantization).
-4. **No non-linear structure check.** Linear CKA can't see kernel-level changes that matter for non-linear downstream heads.
-
-Every metric below is justified against one of these four gaps.
+Experiments to validate any of this against the existing §4 checkpoints live in [`paper_extention.md`](./paper_extention.md). This doc is the *codebase* roadmap; that one is the *experimental* roadmap.
 
 ---
 
-## Global structure (sibling to CKA)
+## How to read this
 
-### - [ ] Orthogonal Procrustes distance
-- **What it measures:** Frobenius norm of `Z1 - R·Z0` after solving for the optimal rotation `R`. Closed form via SVD of `Z0ᵀZ1`.
-- **Why we need it:** Fills gap **#1** — magnitude of drift in original units. CKA says "0.87 similar"; Procrustes says "embeddings moved an average of 0.34 units after best alignment."
-- **What it adds:** A directly interpretable drift number that domain experts can reason about. Especially useful in calibration / transfer functions because it has the same units as embedding distances downstream tasks operate on.
-- **Cost:** O(n·d²) — one SVD of a d×d matrix. Cheap.
-- **Notes:** Rotation-invariant by construction. Pairs naturally with CKA: CKA for "structural similarity", Procrustes for "movement magnitude".
-
-### - [ ] RSA / pairwise-distance correlation
-- **What it measures:** Spearman correlation between flat upper triangles of pairwise distance matrices in Z0 and Z1.
-- **Why we need it:** Catches monotonic structural changes that Linear CKA can miss. Also the standard "second opinion" metric in neuro-ML and interpretability literature — gives credibility.
-- **What it adds:** Rank-based, scale-invariant, no kernel choice required. Very intuitive to non-specialists ("are the same pairs still close?").
-- **Cost:** O(n²·d) for the distance matrices + O(n² log n) for ranking.
-- **Notes:** Use Spearman, not Pearson, so outlier pairs don't dominate.
-
-### - [ ] RBF-kernel CKA
-- **What it measures:** Same HSIC normalization as Linear CKA but with Gaussian Gram matrices `K[i,j] = exp(-γ‖xᵢ-xⱼ‖²)`.
-- **Why we need it:** Fills gap **#4** — non-linear structural similarity. Two embedding spaces can have identical Linear CKA but very different local geometry that downstream non-linear heads see.
-- **What it adds:** Catches drift Linear CKA can't see when the model develops new non-linear separations.
-- **Cost:** O(n²) — same as Linear CKA, with one extra exponentiation per Gram entry.
-- **Notes:** Bandwidth `γ` should default to the median heuristic (`1 / median(‖xᵢ-xⱼ‖²)`). Add as a hyperparameter on the metric entry.
-
-### - [ ] SVCCA (Singular Vector CCA)
-- **What it measures:** Project Z0 and Z1 onto their top-k singular directions, then compute CCA. Returns mean correlation.
-- **Why we need it:** Noise-robust similarity. When models have many near-zero-variance directions (common after fine-tuning), raw CKA gets noisy; SVCCA is stable.
-- **What it adds:** Better behavior on high-dim spaces with rank deficiency.
-- **Cost:** O(n·d² + k³). More expensive than CKA but tractable.
-- **Notes:** Default `k` from variance threshold (e.g., top directions covering 99% of variance).
-
-### - [ ] PWCCA (Projection-Weighted CCA)
-- **What it measures:** CCA correlations weighted by direction importance (Morcos et al. 2018).
-- **Why we need it:** Sharper than plain CCA at detecting drift that affects task-relevant directions, ignoring drift in irrelevant ones.
-- **What it adds:** Often correlates better with downstream task degradation than raw CCA.
-- **Cost:** Similar to SVCCA.
-- **Notes:** Worth adding only after SVCCA — they share most infrastructure.
+- **Families A–F** are metric groups. Each metric has a one-paragraph rationale + tags + cost.
+- **Families G–I** are cross-cutting infrastructure (API, anchor protocol, calibration).
+- **Phased rollout** at the end maps everything to v0.2 / v0.3 / future-work waves.
+- **Coverage matrix** below gives the 30-second summary.
 
 ---
 
-## Local structure (sibling to NPS)
+## Coverage matrix
 
-### - [ ] Trustworthiness & Continuity (Venna & Kaski 2001) ⭐ high priority
-- **What it measures:** Two numbers, not one:
-  - **Trustworthiness:** penalizes points that are k-NN in Z1 but were *not* k-NN in Z0 (false neighbors introduced).
-  - **Continuity:** penalizes points that were k-NN in Z0 but are *not* k-NN in Z1 (true neighbors lost).
-- **Why we need it:** Fills gap **#2** — directionality on local drift. NPS = 0.6 could mean "retrieval introduces lots of garbage near-misses" (low Trust, high Continuity) or "retrieval misses things it used to find" (high Trust, low Continuity). These need different remediations.
-- **What it adds:** Actionable diagnostics. Tells users *what kind* of drift they have, not just *how much*. Most valuable single addition to NPS.
-- **Cost:** O(n²) or FAISS-accelerated, same shape as NPS.
-- **Notes:** Should register two metrics (`trustworthiness`, `continuity`) and expose them as a pair.
+| Family | Metrics | Attacks §3.3? | Wave |
+|---|---|---|---|
+| A — Behavioral / ranking | 8 | Yes — primary attack | v0.2 (most) |
+| B — Local structure (NPS family) | 7 | Maybe (B1/B2 asymmetry) | v0.2 (B1/B2/B5), v0.3 (rest) |
+| C — Global structure (CKA family) | 6 | No — robustness only | v0.3 |
+| D — Spectral | 6 | Maybe (D5) | v0.3 |
+| E — Distributional | 5 | No — robustness, quantization | v0.3 / future |
+| F — Temporal layer | 5 | Yes — F5 attack | v0.2 (F1/F2/F3), v0.3 (F4/F5) |
+| G — Registry API | 5 | — | v0.2 (needed to register A–F) |
+| H — Anchor-set protocol | 4 | Yes — H1 enables Family A | v0.2 |
+| I — Calibration & severity | 3 | Yes — I1 enables §7.4 fix | v0.3 |
 
-### - [ ] Mutual k-NN consistency
-- **What it measures:** Of point `i`'s k-NN in Z0, how many of those neighbors *also* have `i` in their top-k in Z1? (Strict mutual relation, not one-way.)
-- **Why we need it:** Filters out hubness artifacts that inflate NPS in high-dim spaces. Embedding spaces are notorious for "hub" points that appear in everyone's nearest-neighbor list.
-- **What it adds:** A stricter local-drift score less fooled by hubs.
+**Total: 36 new metrics + 12 infra items.** Most are 30–200 LOC each. The temporal layer (F) is a meta-feature that wraps any registered metric.
+
+---
+
+# Family A — Behavioral / ranking-stability
+
+The new family. Captures how the model's *scoring behavior* shifts across pair-of-points, not how individual neighborhoods shift. This is the family that has a real shot at closing §3.3, because anti-aligned drift can preserve local neighborhoods while destroying rankings, and aligned drift can reshape local neighborhoods while preserving rankings.
+
+Requires **Q/D anchor partitioning** (see H1) — split the anchor set into a query subset and document subset (default 50/50 with fixed seed).
+
+### - [ ] A1. Score-distribution JSD
+- **What:** Jensen–Shannon divergence between the distribution of pairwise cosine similarities `S_M(q,d)` in Z0 vs Z1, marginalized over (q,d) pairs.
+- **Rationale:** Catches global score-calibration shifts (e.g., the whole score distribution flattens or shifts left under anti-aligned drift). Symmetric, bounded in [0, log 2].
+- **Tags:** [paper] [lib] [mlops]
+- **Cost:** O(n²·d) for the |Q|×|D| similarity matrix per snapshot; O(n²) for the histogram + JSD.
+- **Notes:** Histogram bin count is a hyperparameter (default 100). Robust to label-free use.
+
+### - [ ] A2. Mean absolute pointwise score change
+- **What:** `(1/|Q||D|) · Σ |S_baseline(q,d) − S_updated(q,d)|`, normalized by baseline scale.
+- **Rationale:** Cheaper sibling to JSD, captures pointwise (not just distributional) score drift. Useful when you want a single interpretable number ("scores moved by 0.07 on average").
+- **Tags:** [paper] [lib] [mlops]
+- **Cost:** O(n²·d) for similarity matrices; O(n²) for the sum.
+
+### - [ ] A3. Per-query Rank-Biased Overlap (RBO)
+- **What:** For each query q, RBO between baseline and updated ranking of D. Return mean across queries.
+- **Rationale:** Top-weighted ranking metric — disagreement at rank 1 costs more than at rank 100. Matches what retrieval users actually care about. Bounded [0, 1].
+- **Tags:** [paper] [lib] [mlops]
+- **Cost:** O(|Q|·|D|·log|D|) ranking + O(|Q|·|D|) RBO.
+- **Notes:** Persistence parameter `p` (typically 0.9) is a hyperparameter. RBO is preferred over Kendall τ because it's top-heavy and handles disjoint tails.
+
+### - [ ] A4. Per-query Kendall τ
+- **What:** For each query q, Kendall τ between baseline and updated ranking of D. Return mean.
+- **Rationale:** Standard rank-correlation; familiar to reviewers. Pairs with RBO — τ captures whole-list correlation, RBO captures top-list overlap.
+- **Tags:** [paper] [lib]
+- **Cost:** O(|Q|·|D|·log|D|) via Knight's algorithm.
+- **Notes:** Less informative than RBO when only top results matter. Worth including for credibility.
+
+### - [ ] A5. Self-retrieval top-k consistency
+- **What:** For each anchor `i`, find its top-k nearest neighbors in Z0 and in Z1. Report fraction of anchors where the top-k *sets* match exactly (k=1, 5, 10).
+- **Rationale:** Most interpretable metric in the suite. Maps directly to retrieval-task degradation: "X% of queries would return a different top-1 result." Strong dashboard candidate.
+- **Tags:** [paper] [lib] [mlops]
+- **Cost:** O(n²) once; O(1) per anchor after.
+- **Notes:** Coarser than NPS but more interpretable for non-ML stakeholders.
+
+### - [ ] A6. Reciprocal rank shift
+- **What:** For each anchor pair (i, j) where j was top-ranked for i in Z0, the change in 1/rank of j among i's neighbors in Z1.
+- **Rationale:** Smoother than top-k consistency (continuous instead of binary). Catches "j is now rank 5 instead of rank 1" rather than just "j is no longer top-k."
+- **Tags:** [paper] [lib]
+- **Cost:** O(n²).
+- **Notes:** Bounded in [-1, 1] after normalization.
+
+### - [ ] A7. Paraphrase-invariance preservation
+- **What:** Given labeled paraphrase pairs `(x, x')` in the anchor set, measure `mean(cos(Z_M(x), Z_M(x')))` for each model. Report ratio updated/baseline.
+- **Rationale:** Tests whether *semantic equivalence* is preserved — a more orthogonal signal than score-distribution drift because it's anchored to semantic, not geometric, structure. Fardini Doc 2 §6.2 flags this as the right fallback if pure geometric/behavioral signals fail.
+- **Tags:** [paper] [research]
+- **Cost:** O(n·d) given pairs.
+- **Notes:** Requires labeled paraphrase pairs in the anchor set (see H3). Don't ship until anchor protocol supports it.
+
+### - [ ] A8. Frozen-reference agreement
+- **What:** Given a frozen "oracle" reference model M_ref, compute cosine between `Z_M(x)` and `Z_M_ref(x)` for each anchor. Mean across anchors. Track delta.
+- **Rationale:** The most orthogonal behavioral signal — uses information from outside the drift pair entirely. Production setting: M_ref = the last known-good checkpoint that passed downstream eval.
+- **Tags:** [paper] [mlops] [research]
+- **Cost:** One extra forward pass per anchor at registration time; O(n·d) for the comparison.
+- **Notes:** Requires API extension to register a reference model on the monitor. Pairs naturally with the CI/CD use case.
+
+---
+
+# Family B — Local structure (NPS family)
+
+Extends NPS along the local-neighborhood axis. B1+B2 are the asymmetric decomposition that could discriminate regimes; the rest are robustness improvements.
+
+### - [ ] B1. Trustworthiness (priority)
+- **What:** For each point, penalize neighbors in Z1's top-k that were *not* in Z0's top-k (false neighbors introduced).
+- **Rationale:** Half of the directional NPS decomposition. Anti-aligned drift may introduce more false neighbors (retrieval picks up garbage); aligned drift may not. Falsifiable test for §3.3 attack #3.
+- **Tags:** [paper] [lib] [mlops]
+- **Cost:** Same as NPS — O(n²) or FAISS-accelerated.
+
+### - [ ] B2. Continuity (priority)
+- **What:** For each point, penalize neighbors in Z0's top-k that are *not* in Z1's top-k (true neighbors lost).
+- **Rationale:** Other half of the directional decomposition. Aligned drift may lose more true neighbors (model has *intentionally* reshaped); anti-aligned may not.
+- **Tags:** [paper] [lib] [mlops]
 - **Cost:** Same as NPS.
-- **Notes:** Often a better predictor of retrieval failure than vanilla NPS.
+- **Notes:** Register B1 and B2 as paired metrics. The *ratio* T/C is the discriminating signal.
 
-### - [ ] Mean rank shift
-- **What it measures:** For each anchor pair (i,j), how does j's rank in i's neighbor list change between Z0 and Z1? Mean absolute change.
-- **Why we need it:** NPS is binary at the k-boundary — a neighbor at rank-k vs rank-(k+1) flips the count. Mean rank shift is continuous.
-- **What it adds:** Smoother metric that doesn't have NPS's cliff edge. Good for plotting drift over many checkpoints.
-- **Cost:** O(n²) — need full rank lists, not just top-k.
+### - [ ] B3. Mutual k-NN consistency
+- **What:** For each point i, fraction of i's k-NN in Z0 that have i in *their* top-k in Z1 (strict mutual relation).
+- **Rationale:** Filters out hubness artifacts — single "hub" points appearing in everyone's neighborhood list don't dominate the score.
+- **Tags:** [lib] [mlops]
+- **Cost:** O(n²) or FAISS.
 
-### - [ ] NPS curve at multiple k
-- **What it measures:** NPS evaluated at k ∈ {1, 5, 10, 50, 100}.
-- **Why we need it:** Drift can be scale-dependent — local clusters intact (NPS@5 high) but global topology disrupted (NPS@100 low), or vice versa.
-- **What it adds:** Almost free to compute (you build the full neighbor list anyway). Reveals which scale of structure the drift affected.
-- **Cost:** Sub-linear extra on top of single-k NPS.
-- **Notes:** Could just be an extension to the existing NPS metric API rather than a new metric.
+### - [ ] B4. Mean rank shift
+- **What:** For each anchor pair (i, j), j's rank-in-i's-neighbors changes by Δ. Mean |Δ| across all pairs.
+- **Rationale:** Smoother than NPS — no cliff at the k-boundary. Useful for time-series plots over many checkpoints.
+- **Tags:** [lib]
+- **Cost:** O(n²) for full rank lists.
 
----
+### - [ ] B5. NPS curve (multi-k)
+- **What:** NPS evaluated at k ∈ {1, 5, 10, 25, 50, 100}.
+- **Rationale:** Drift can be scale-dependent. The §6.2 sanity check shows 4.6 pp spread across k — that's signal, not noise. Reveals which scale of local structure the drift affected.
+- **Tags:** [paper] [lib]
+- **Cost:** ~free given the existing FAISS index.
+- **Notes:** API: register `nps_at_k` factory that returns one MetricEntry per k.
 
-## Spectral / geometric (sibling to Isotropy Δ)
+### - [ ] B6. LCMC (Local Continuity Meta-Criterion)
+- **What:** k-NN overlap normalized by expected random overlap: `(NPS·k − k²/(n−1)) · 1/(1 − k/(n−1))`.
+- **Rationale:** Subtracts the random baseline NPS already shows in the §6.2 sanity check (`k/(n−1)`). Gives a "skill above random" interpretation in [0, 1].
+- **Tags:** [lib]
+- **Cost:** Trivial post-processing of NPS.
 
-### - [ ] Effective rank Δ (Roy & Vetterli 2007) ⭐ high priority
-- **What it measures:** `exp(H(σ̃²))` where `σ̃² = σ² / Σσ²` is the normalized singular value distribution. Delta between Z0 and Z1.
-- **Why we need it:** Current Isotropy Δ uses `σ_min/σ_max`, which is dominated by the noise floor — two very different spaces can have nearly identical ratios because both have at least one tiny singular value.
-- **What it adds:** A robust effective-dimensionality measure that uses all singular values, not just the extremes.
-- **Cost:** One SVD per snapshot — same as current Isotropy. Can cache.
-- **Notes:** You already have `effective_dimensionality()` in `metrics/isotropy.py:81` — just expose it as a registered `(Z0, Z1) → float` metric.
-
-### - [ ] Participation ratio Δ
-- **What it measures:** `PR = (Σσ²)² / Σσ⁴`, then delta.
-- **Why we need it:** Cross-check on Effective Rank. Same family but different sensitivity to the tail of the spectrum.
-- **What it adds:** Cheap sanity-check metric — if PR and Effective Rank disagree, the spectrum has unusual shape worth investigating.
-- **Cost:** Negligible after SVD.
-
-### - [ ] Stable rank Δ
-- **What it measures:** `‖Z‖_F² / ‖Z‖_2²`, then delta.
-- **Why we need it:** Cheapest effective-rank proxy — no full SVD needed, just Frobenius norm and top singular value.
-- **What it adds:** Fast effective-rank surrogate for use in production monitoring loops.
-- **Cost:** O(n·d) Frobenius + O(n·d) power iteration for top σ.
-
-### - [ ] Spectral entropy Δ
-- **What it measures:** Shannon entropy of normalized singular values.
-- **Why we need it:** Different normalization than effective rank — can be more sensitive when spectrum has a long tail.
-- **What it adds:** Optional companion to effective rank for users who want maximum spectral information.
-- **Cost:** Negligible after SVD.
-- **Notes:** Lower priority — Effective Rank usually suffices.
+### - [ ] B7. Hubness shift
+- **What:** Skewness of the distribution of "k-occurrences" (how many times each point appears in others' top-k). Track delta between Z0 and Z1.
+- **Rationale:** Hubness is a documented embedding pathology — drift can introduce or remove hub points, which silently breaks retrieval. Doesn't show up in NPS.
+- **Tags:** [lib] [mlops] [research]
+- **Cost:** O(n·k) post-processing of the FAISS index.
 
 ---
 
-## Distributional (currently missing axis)
+# Family C — Global structure (CKA family)
 
-### - [ ] MMD (Maximum Mean Discrepancy, RBF kernel) ⭐ high priority
-- **What it measures:** Kernel two-sample test statistic between the embedding distributions of Z0 and Z1.
-- **Why we need it:** Fills gap **#3** entirely — currently no metric tells you if the marginal distribution has shifted. Particularly important for catching quantization drift (where points rotate slightly but the cloud shape changes).
-- **What it adds:** Detects drift NPS and CKA miss when anchors are correlated. Standard in distribution-shift literature, so users will trust it.
-- **Cost:** O(n²·d). For large anchor sets, use random Fourier features for O(n·d·m) approximation.
-- **Notes:** Stochastic if RBF bandwidth uses random subsampling — needs a seed. See "API note" below.
+Robustness expansions to CKA. None of these attack §3.3 — they're library breadth.
 
-### - [ ] Sliced Wasserstein distance
-- **What it measures:** Average Wasserstein-1 distance between Z0 and Z1 projected onto L random directions.
-- **Why we need it:** Captures shape + location distributional shifts at sub-quadratic cost.
-- **What it adds:** Where MMD captures kernel-level differences, Sliced Wasserstein captures geometric transport cost — closer to "how much mass moved how far."
-- **Cost:** O(L·n·log n) for L projections (typically L ≈ 50).
-- **Notes:** Stochastic — needs a seed.
+### - [ ] C1. Orthogonal Procrustes distance
+- **What:** Frobenius norm of `Z1 − R·Z0` after solving for optimal rotation R via SVD of `Z0ᵀZ1`.
+- **Rationale:** Rotation-invariant magnitude of drift in original units. CKA tells you "how similar?", Procrustes tells you "by how much did things move?" Useful in transfer functions because the units match downstream-task distances.
+- **Tags:** [lib]
+- **Cost:** O(n·d² + d³) for the SVD.
 
-### - [ ] Fréchet distance (FID-style)
-- **What it measures:** Wasserstein-2 between Gaussian fits to Z0 and Z1 — combines mean shift and covariance shift.
-- **Why we need it:** Familiar to vision/generative practitioners (FID, KID family). Lowers adoption barrier.
-- **What it adds:** A single number combining first and second moments. Strong baseline.
-- **Cost:** O(d³) for the covariance matrix square root.
+### - [ ] C2. RSA / pairwise-distance correlation
+- **What:** Spearman correlation between flat upper triangles of pairwise distance matrices in Z0 and Z1.
+- **Rationale:** Standard "second opinion" metric from interpretability literature. Rank-based, scale-invariant. Intuitive to non-specialists.
+- **Tags:** [lib]
+- **Cost:** O(n²·d) for distance matrices, O(n² log n) for ranking.
+
+### - [ ] C3. RBF-kernel CKA
+- **What:** CKA with Gaussian Gram matrices `K[i,j] = exp(−γ‖xᵢ−xⱼ‖²)` instead of linear.
+- **Rationale:** Catches non-linear structural similarity Linear CKA misses. Default `γ` via median heuristic.
+- **Tags:** [lib]
+- **Cost:** O(n²) with extra exponentiation.
+
+### - [ ] C4. SVCCA
+- **What:** Project Z0, Z1 onto top-k singular directions, then CCA. Mean correlation.
+- **Rationale:** Noise-robust similarity. Better than CKA when models have near-zero-variance directions.
+- **Tags:** [lib] [research]
+- **Cost:** O(n·d² + k³).
+
+### - [ ] C5. PWCCA
+- **What:** CCA correlations weighted by direction importance (Morcos et al. 2018).
+- **Rationale:** Sharper than SVCCA at detecting drift in task-relevant directions.
+- **Tags:** [lib] [research]
+- **Cost:** Similar to SVCCA.
+
+### - [ ] C6. Distance correlation (dCor)
+- **What:** Energy-based dependence measure between Z0 and Z1; non-linear, no kernel choice.
+- **Rationale:** Tests dependence (not just linear similarity) without picking a kernel bandwidth. Complementary to RBF-CKA.
+- **Tags:** [lib]
+- **Cost:** O(n²·d).
+
+---
+
+# Family D — Spectral
+
+Replaces / extends the current `isotropy_delta` (which uses fragile `σ_min/σ_max`). D5 is the only one with a §3.3 angle.
+
+### - [ ] D1. Effective rank Δ (priority)
+- **What:** `exp(H(σ̃²))` where `σ̃² = σ² / Σσ²`. Delta between snapshots.
+- **Rationale:** Robust effective-dimensionality from full spectrum, not just extremes. You already have `effective_dimensionality()` in `metrics/isotropy.py:81` — just expose as a registered `(Z0,Z1)→float`.
+- **Tags:** [lib] [mlops]
+- **Cost:** One SVD per snapshot (cacheable).
+
+### - [ ] D2. Participation ratio Δ
+- **What:** `PR = (Σσ²)² / Σσ⁴`, then delta.
+- **Rationale:** Cross-check on effective rank — different tail sensitivity. If PR and effective rank disagree, the spectrum has an unusual shape worth investigating.
+- **Tags:** [lib]
+- **Cost:** Negligible after SVD.
+
+### - [ ] D3. Stable rank Δ
+- **What:** `‖Z‖_F² / ‖Z‖_2²`, then delta.
+- **Rationale:** Cheapest effective-rank proxy — no full SVD, just Frobenius + power iteration for top σ. Good for tight production monitoring loops.
+- **Tags:** [lib] [mlops]
+- **Cost:** O(n·d) Frobenius + O(n·d) power iteration.
+
+### - [ ] D4. Spectral entropy Δ
+- **What:** Shannon entropy of `σ² / Σσ²`, then delta.
+- **Rationale:** Different normalization than effective rank; can be more sensitive when spectrum has a long tail.
+- **Tags:** [lib]
+- **Cost:** Negligible after SVD.
+
+### - [ ] D5. Anisotropy direction shift- **What:** Angle between top singular vector of `Z0_centered` and `Z1_centered`. Range [0, π/2].
+- **Rationale:** Captures *where* the dominant embedding direction has rotated, not just whether the spectrum changed magnitude. If anti-aligned drift rotates the dominant direction more than aligned drift, this discriminates.
+- **Tags:** [paper] [lib] [research]
+- **Cost:** Negligible after top-1 SVD.
+
+### - [ ] D6. IsoScore Δ
+- **What:** IsoScore (Rudman et al. 2022) — a more robust isotropy estimator than `σ_min/σ_max`.
+- **Rationale:** Modern replacement for the current isotropy metric. Reviewers familiar with embedding literature will expect this.
+- **Tags:** [lib]
+- **Cost:** O(d²) post-SVD.
+
+---
+
+# Family E — Distributional
+
+Tests whether the marginal embedding distribution shifted. None attacks §3.3 directly (same orthogonality limit as all pure-geometric metrics), but several are valuable for production monitoring and the deferred quantization study (§7.3).
+
+### - [ ] E1. MMD (RBF kernel)
+- **What:** Maximum Mean Discrepancy between the embedding distributions of Z0 and Z1 with Gaussian kernel.
+- **Rationale:** Kernel two-sample test from distribution-shift literature. Standard, reviewer-trusted. Catches drift NPS / CKA miss when anchors are correlated.
+- **Tags:** [lib] [mlops] [research]
+- **Cost:** O(n²·d). Use random Fourier features for O(n·d·m) approximation on large anchor sets.
+- **Notes:** Stochastic — needs seeded bandwidth (see G3).
+
+### - [ ] E2. Sliced Wasserstein distance
+- **What:** Average Wasserstein-1 over L random 1-D projections.
+- **Rationale:** Transport-based distance — captures shape + location shifts. Cheaper than full Wasserstein, scalable to high dim.
+- **Tags:** [lib] [research]
+- **Cost:** O(L·n log n) for L projections.
+- **Notes:** Stochastic — needs seed (G3). Default L=50.
+
+### - [ ] E3. Fréchet distance (FID-style)
+- **What:** Wasserstein-2 between Gaussian fits to Z0 and Z1.
+- **Rationale:** Familiar to vision practitioners (FID). Single number combining mean and covariance shift.
+- **Tags:** [lib] [research]
+- **Cost:** O(d³) for covariance matrix square root.
 - **Notes:** Sensitive to outliers; not robust on small anchor sets.
 
-### - [ ] Embedding-norm KS test
-- **What it measures:** Kolmogorov-Smirnov statistic between the distributions of `‖z‖` in Z0 and Z1.
-- **Why we need it:** Catches pure-scale drift that cosine-based metrics miss entirely. This is a *real* failure mode after LoRA / quantization where directions are preserved but norms drift.
-- **What it adds:** Cheap, statistically principled detector for a specific failure mode none of the current metrics catch.
-- **Cost:** O(n log n).
-- **Notes:** Important if users care about un-normalized embeddings (e.g., dot-product retrieval, not just cosine).
+### - [ ] E4. Embedding-norm KS test- **What:** Kolmogorov–Smirnov statistic between distributions of `‖z‖` in Z0 and Z1.
+- **Rationale:** Catches **pure-scale drift** that cosine-based metrics miss entirely. Critical for the deferred quantization study (§7.3) — quantization rotates directions slightly but mainly changes norms.
+- **Tags:** [lib] [mlops] [research]
+- **Cost:** O(n log n). Cheap.
+
+### - [ ] E5. Pairwise distance distribution KS/JSD
+- **What:** KS / JSD between the full distribution of pairwise distances in Z0 vs Z1.
+- **Rationale:** Stronger than mean-only distance shift — catches changes in distance variance, multimodality, tail behavior.
+- **Tags:** [lib] [research]
+- **Cost:** O(n²·d) for distance matrices.
 
 ---
 
-## Behavioral (downstream-flavored, no labels needed)
+# Family F — Temporal layer (meta-feature)
 
-### - [ ] Self-retrieval top-1 consistency ⭐ high priority
-- **What it measures:** For each anchor, find its top-1 nearest neighbor in Z0 and in Z1. Report fraction of anchors where these match.
-- **Why we need it:** Most explainable metric you could ship. Maps directly to retrieval-task degradation: "X% of queries would have returned a different result."
-- **What it adds:** The "demo metric" — what you put on a dashboard for non-ML stakeholders. Stronger ROI than any of the abstract similarity metrics.
-- **Cost:** O(n²) once, O(1) per anchor after.
-- **Notes:** Coarser than NPS but interpretable; consider also exposing top-5 and top-10 variants.
+Not metrics themselves — they *wrap* any registered metric to produce time-series signals. From Fardini Doc 1. F3 / F5 are the operational and paper-relevant pieces.
 
-### - [ ] Cosine-rank correlation
-- **What it measures:** For each anchor pair (i,j), Spearman correlation between `cos(Z0_i, Z0_j)` and `cos(Z1_i, Z1_j)`.
-- **Why we need it:** RSA variant on cosine instead of Euclidean — especially relevant since you already L2-normalize embeddings.
-- **What it adds:** A normalized-space analogue of RSA that's natural for retrieval embeddings.
-- **Cost:** O(n²).
+### - [ ] F1. Velocity wrapper
+- **What:** Given a sequence of snapshots and a metric M, compute `dM/dt` via central differences normalized for unequal checkpoint spacing.
+- **Rationale:** Reveals when geometry is moving fastest. The §4.3.1 trajectory peaks at epochs 1→3 — invisible to value-only NPS.
+- **Tags:** [paper] [lib] [mlops]
+- **Cost:** O(T) per trajectory, where T = number of checkpoints.
+- **Notes:** API: `Velocity(metric_name)` returns a function `(snapshots, times) → np.ndarray`.
+
+### - [ ] F2. Acceleration wrapper
+- **What:** Second finite difference, `d²M/dt²`.
+- **Rationale:** Detects deceleration toward plateau, re-acceleration, oscillation.
+- **Tags:** [paper] [lib]
+- **Cost:** O(T) post-velocity.
+
+### - [ ] F3. Plateau detector (priority)
+- **What:** Boolean signal: `|velocity| < ε AND |acceleration| < δ for k consecutive checkpoints`.
+- **Rationale:** **Highest-ROI library addition.** The §4.3.1 data shows the MLM run is essentially settled by epoch 10 — 97% of geometric change at 20% of compute. Production training loops can save real money. Fardini Doc 1 §4.1.
+- **Tags:** [paper] [lib] [mlops]
+- **Cost:** O(T) trivially.
+- **Notes:** Default thresholds: ε = 0.005, δ = 0.001, k = 3. Tunable against multi-seed noise floors (§7.5).
+
+### - [ ] F4. Decay-residual anomaly score
+- **What:** Fit `log|velocity|` to a line in the post-warmup phase. Per-checkpoint anomaly score = residual / residual_std.
+- **Rationale:** Flags training-dynamics anomalies — oscillation, re-acceleration, persistent over/undershoot. Needs the §4.6 anti-InfoNCE trajectory as positive control.
+- **Tags:** [paper] [lib] [research]
+- **Cost:** O(T) per trajectory.
+- **Notes:** Honest caveats from Fardini Doc 1 §3.2 — exponential baseline only holds post-warmup, two-phase decay common. Ship as `experimental` flag in v0.3.
+
+### - [ ] F5. Decay-shape regime classifier
+- **What:** Classify a trajectory by the *shape* of its `log|velocity|` curve (linear with negative slope? piecewise? oscillating?).
+- **Rationale:** **§3.3 attack #2.** If aligned / random / anti-aligned regimes have qualitatively different decay shapes (not just different rates), this is a label-free regime classifier from temporal dynamics alone.
+- **Tags:** [paper] [research]
+- **Cost:** O(T) per trajectory; classifier fitting is small.
+- **Notes:** See `paper_extention.md` Experiment 2 for validation protocol.
 
 ---
 
-## Recommended priority order
+# Family G — Registry / API changes
 
-If you're adding metrics in waves, this is the order that maximizes coverage-per-effort:
+The current `MetricRegistry` (`metrics/registry.py`) needs four upgrades to support Families A–F cleanly.
 
-| Wave | Metric | Gap filled | Rationale |
-|------|--------|-----------|-----------|
-| 1 | Orthogonal Procrustes distance | #1 magnitude | Closed form, ~30 LOC, fills the biggest gap |
-| 1 | Trustworthiness & Continuity | #2 directionality | Single most actionable diagnostic improvement |
-| 1 | MMD | #3 distributional | Opens an entire missing axis |
-| 1 | Effective Rank Δ | sharper #4 | You already have the building block |
-| 1 | Self-retrieval top-1 consistency | explainability | Highest stakeholder ROI |
-| 2 | RSA / pairwise-distance correlation | non-linear cross-check | Easy follow-up to Procrustes |
-| 2 | RBF-kernel CKA | #4 non-linear | Drop-in extension to existing CKA code |
-| 2 | Embedding-norm KS | scale drift | Quick to write, catches a real failure mode |
-| 2 | Mutual k-NN consistency | hubness-robust local | Stricter NPS variant |
-| 3 | SVCCA / PWCCA | noise-robust global | Higher complexity; only if Wave 1+2 insufficient |
-| 3 | Sliced Wasserstein | transport distributional | If MMD proves insufficient |
-| 3 | Participation Ratio, Stable Rank, Spectral Entropy | spectral cross-checks | Cheap; bundle with Effective Rank |
-| 3 | Mean rank shift, NPS-curve | smoother local | Optional refinements |
+### - [ ] G1. Hyperparameter dict on `MetricEntry`
+- **What:** Add optional `params: dict` field. Registry calls `fn(Z0, Z1, **entry.params)`.
+- **Why:** Families A (Q/D split, RBO persistence), C (CKA bandwidth), E (MMD kernel, SW projections) all need configurable hyperparameters that should be recorded in calibration profiles for reproducibility.
+- **API impact:** Backward-compatible — defaults to `{}`. `register(name, fn, params={...})`.
+- **Tags:** [lib]
+
+### - [ ] G2. Multi-k registration helper
+- **What:** `register_at_k(base_name, fn, ks=[1, 5, 10, 25, 50])` — registers one metric per k value.
+- **Why:** B5 (NPS curve), A5 (top-k consistency), and several Family B metrics need this idiom.
+- **Tags:** [lib]
+
+### - [ ] G3. Stochastic metric seeding pattern
+- **What:** Document and enforce: stochastic metrics either (a) close over a fixed seed at registration, or (b) accept a `seed` in `params` (G1). The current `_validate_determinism` check rejects anything random.
+- **Why:** Family E (MMD, SW), Family A (any randomized projection variants), Family F4 (regression bootstrap CIs).
+- **Tags:** [lib]
+
+### - [ ] G4. Temporal wrapper for any base metric
+- **What:** `register_with_temporal(name, fn)` registers `{name, name_velocity, name_acceleration}` automatically. The temporal versions accept `list[Snapshot]` + `list[float]` (times) and return per-checkpoint arrays.
+- **Why:** Family F is a meta-feature; this exposes it as first-class API rather than a special case in user code.
+- **Tags:** [lib] [paper]
+
+### - [ ] G5. Per-tower metric routing (clarify existing)
+- **What:** Document and harden the existing per-tower metric flow in `core/monitor.py:172-181`. Currently per-tower metrics use the same registry — should support tower-specific metrics (e.g., behavioral metrics on text tower only, even for multi-tower models).
+- **Why:** CLIP-style multi-tower with asymmetric metric selection.
+- **Tags:** [lib]
 
 ---
 
-## API note before implementing
+# Family H — Anchor-set protocol
 
-The registry's determinism check (`metrics/registry.py:106-130`) calls the function on random data and rejects any function whose two calls don't return identical floats. This will reject any stochastic metric (MMD with random kernel bandwidth, Sliced Wasserstein with random projections) unless the randomness is seeded.
+Family A requires Q/D partitioning. Family A7 requires labeled paraphrase pairs. §5.2 establishes that anchor-set distribution matters and current handling is implicit. Make all this explicit.
 
-Two paths to handle this:
+### - [ ] H1. Q/D partitioning on `AnchorSet` (priority)
+- **What:** Add `partition(ratio=0.5, seed=0) → (AnchorSet_Q, AnchorSet_D)` method. Result is reproducible (seeded), hashed into `version_hash` so paired snapshots can verify they used the same split.
+- **Why:** All of Family A depends on this. Without it, behavioral metrics can't be computed.
+- **Tags:** [paper] [lib]
 
-- **Closure approach (simpler).** Wrap stochastic metrics in a factory like `make_mmd(seed=0, kernel="rbf", bw="median")` that returns a closed-over function with all randomness baked in. No registry changes needed. Trade-off: hyperparameters are frozen at registration time.
+### - [ ] H2. Anchor-distribution provenance tagging
+- **What:** Add `distribution_tag: str` field to `AnchorSet` (e.g., `"training-dist"` / `"OOD"` / `"deployment-prod"`). `Comparison` carries this through.
+- **Why:** §5.2 demonstrated 2.3× NPS magnitude difference between training-dist and OOD anchors on the same checkpoint. Without provenance, cross-experiment comparisons silently misalign.
+- **Tags:** [lib] [mlops]
 
-- **Config-on-entry approach (more flexible).** Extend `MetricEntry` with an optional `params: dict` field; have the registry call `fn(Z0, Z1, **entry.params)`. Backward-compatible if `params` defaults to `{}`. Lets calibration profiles record which hyperparameters were used — useful for reproducibility audits across model versions.
+### - [ ] H3. Paraphrase / labeled-pair anchor extension
+- **What:** Subclass `LabeledPairAnchorSet(AnchorSet)` with `pairs: list[tuple[int, int]]` indicating semantic-equivalence pairs.
+- **Why:** Family A7 (paraphrase invariance). More orthogonal to geometry than score-distribution drift.
+- **Tags:** [paper] [research]
 
-**Recommendation:** Start with the closure approach for Wave 1. Move to config-on-entry in Wave 2 once you have multiple metrics that share hyperparameters and need them recorded in `CalibrationProfile`.
+### - [ ] H4. Multi-anchor evaluation
+- **What:** `monitor.compare_across_anchors(s0_list, s1_list)` — runs metrics against multiple anchor sets and returns disaggregated results.
+- **Why:** §5.2 recommends consistent anchor protocol *within* an experiment, but cross-anchor comparison is itself a diagnostic (large variance across anchors = anchor-dependent drift, small variance = global drift).
+- **Tags:** [lib] [mlops]
+
+---
+
+# Family I — Calibration & severity
+
+The current severity scale uses fixed thresholds (`comparison.py:42-49`); §7.5 explicitly lists "recalibrate severity thresholds against multi-seed noise floors" as an action item. The §7.4 NPS-bound replacement also lives here.
+
+### - [ ] I1. Per-regime transfer functions
+- **What:** Extend `LinearTransfer` to accept an optional regime label. Fit one transfer function per regime. At inference, requires either a known regime or a regime classifier (Family A or F5 output).
+- **Why:** **Resolves §7.4 open question.** The current `degradation ≥ (1−NPS)` framing is broken — strictly violated under aligned drift, meaningless under anti-aligned. Per-regime transfer functions replace it with an empirical regime-dependent relationship.
+- **Tags:** [paper]
+- **Notes:** See `paper_extention.md` Experiment 6 for the calibration protocol.
+
+### - [ ] I2. Multi-seed noise-floor severity calibration
+- **What:** Replace hard-coded severity thresholds with `calibrate_thresholds(reference_snapshots: list[Snapshot])` that derives LOW/MEDIUM/HIGH/CRITICAL boundaries from the std of multi-seed reference runs.
+- **Why:** §7.5 action item. The current `NPS > 0.95 = LOW` threshold doesn't reflect that CLIP has σ ≈ 0.018 across seeds while E5 has σ ≈ 0.002 — same threshold means different things for different model families.
+- **Tags:** [lib] [mlops]
+
+### - [ ] I3. Regime-classifier severity tier
+- **What:** Add a `regime: AlertRegime` field to `Comparison` set by a registered regime classifier (Family A or F5). New severity logic: BLOCK if regime=anti-aligned AND any metric crosses MEDIUM; MONITOR if regime=random; PASS if regime=aligned regardless of magnitude.
+- **Why:** Production deployment of the §3.3 attack. Once regime classification works (Exp 1 or Exp 2 in `paper_extention.md`), this is the production-facing API for it.
+- **Tags:** [paper] [mlops]
+
+---
+
+# Phased rollout
+
+## v0.2 — Paper-supporting + immediate library wins
+
+**Goal:** ship everything needed for `paper_extention.md` experiments + the high-ROI MLOps additions.
+
+- [ ] **G1** — Hyperparameter dict (prerequisite for A, C, E)
+- [ ] **G2** — Multi-k registration helper
+- [ ] **H1** — Q/D partitioning (prerequisite for Family A)
+- [ ] **H2** — Anchor-distribution provenance tagging
+- [ ] **A1** — Score-distribution JSD
+- [ ] **A2** — Mean abs pointwise score Δ
+- [ ] **A3** — Per-query RBO
+- [ ] **A4** — Per-query Kendall τ
+- [ ] **A5** — Self-retrieval top-k consistency
+- [ ] **B1** — Trustworthiness
+- [ ] **B2** — Continuity
+- [ ] **B5** — NPS curve (multi-k)
+- [ ] **F1** — Velocity wrapper
+- [ ] **F2** — Acceleration wrapper
+- [ ] **F3** — Plateau detector
+- [ ] **G4** — Temporal wrapper for any base metric
+- [ ] **I2** — Multi-seed noise-floor severity calibration
+
+That's 17 items. Each ~30–200 LOC. Realistic for v0.2.
+
+## v0.3 — Library robustness
+
+**Goal:** broaden coverage for non-paper use cases. PyPI release candidate.
+
+- [ ] **A6** — Reciprocal rank shift
+- [ ] **B3** — Mutual k-NN consistency
+- [ ] **B4** — Mean rank shift
+- [ ] **B6** — LCMC
+- [ ] **B7** — Hubness shift
+- [ ] **C1** — Procrustes distance
+- [ ] **C2** — RSA
+- [ ] **C3** — RBF-kernel CKA
+- [ ] **D1** — Effective rank Δ
+- [ ] **D2** — Participation ratio Δ
+- [ ] **D3** — Stable rank Δ
+- [ ] **D5** — Anisotropy direction shift
+- [ ] **E4** — Embedding-norm KS
+- [ ] **F4** — Decay-residual anomaly (experimental flag)
+- [ ] **F5** — Decay-shape regime classifier
+- [ ] **G3** — Stochastic metric seeding pattern
+- [ ] **G5** — Per-tower metric routing
+- [ ] **I1** — Per-regime transfer functions
+- [ ] **I3** — Regime-classifier severity tier
+
+19 items.
+
+## Future / research / post-paper
+
+- [ ] **A7** — Paraphrase-invariance preservation (needs H3)
+- [ ] **A8** — Frozen-reference agreement
+- [ ] **C4** — SVCCA
+- [ ] **C5** — PWCCA
+- [ ] **C6** — Distance correlation
+- [ ] **D4** — Spectral entropy Δ
+- [ ] **D6** — IsoScore Δ
+- [ ] **E1** — MMD
+- [ ] **E2** — Sliced Wasserstein
+- [ ] **E3** — Fréchet distance
+- [ ] **E5** — Pairwise distance distribution KS/JSD
+- [ ] **H3** — Paraphrase / labeled-pair anchor extension
+- [ ] **H4** — Multi-anchor evaluation
+
+13 items. Ship as user requests demand them.
+
+---
+
+# Implementation notes
+
+## Stochastic metric pattern
+
+The current `_validate_determinism` check (`metrics/registry.py:106-130`) calls a metric on random data twice and rejects any function whose output differs. This breaks for Families E (MMD, SW with random projections) and any RFF-approximated A1/A2.
+
+Two compatible patterns:
+
+**Closure approach (default for v0.2):** Wrap stochastic metrics in factories that close over a fixed seed at registration.
+
+```python
+def make_mmd(seed: int = 0, kernel: str = "rbf", bandwidth: str = "median"):
+    rng = np.random.default_rng(seed)
+    def mmd(Z0, Z1):
+        # use rng only at fit time
+        ...
+    return mmd
+
+registry.register("mmd_rbf", make_mmd(seed=0), description="...")
+```
+
+**Config-on-entry approach (v0.3+):** Use G1's `params` dict to inject seeds at call time, recorded in `CalibrationProfile`.
+
+```python
+registry.register("mmd", mmd_fn, params={"seed": 0, "kernel": "rbf"})
+# Reproducible across runs because params is part of the calibration profile.
+```
+
+The config approach is required for I1's per-regime transfer functions because reproducibility audits across model versions need to know which hyperparameters were used.
+
+## Backward compatibility
+
+The current public API (`DriftMonitor`, `Snapshot`, `Comparison`, `AnchorSet`) does not need breaking changes. All Family A–F additions are new metrics behind the existing registry. Family G–I are additive — new optional fields on existing dataclasses, new methods.
+
+Only breaking change required: **Severity recomputation under I2.** Custom code that relies on the literal threshold values in `comparison.py:42-49` would need updating. Existing comparisons saved to disk are fine — severity is recomputed on load.
+
+## Cross-cutting effort: integrations layer
+
+The §7.5 PyPI release item depends on the integrations layer actually working. Current state (`integrations/__init__.py` doesn't export `ConsoleLogger`, no `WandbLogger` / `MLflowLogger` implementation despite pyproject extras). Either:
+
+1. **Ship ConsoleLogger only**, mark W&B / MLflow as `# TODO` in README, deprioritize the "MLOps ready" tagline until they exist.
+2. **Implement minimal W&B / MLflow loggers** (~150 LOC each) that flatten `Comparison` and `ClassificationResult` into the respective logging APIs.
+
+Recommend (1) for v0.2, (2) for v0.3.
