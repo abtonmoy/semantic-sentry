@@ -1,0 +1,114 @@
+# SemanticSentry — Improvement Backlog
+
+Audit performed against v0.1.0 source tree, April 2026.
+Ordered by leverage within each section. File paths are relative to `src/semantic_sentry/`.
+
+---
+
+## Highest leverage
+
+### 1. `DriftMonitor` is stateful between `compare()` and `classify()`
+`core/monitor.py:200-203` stashes `_last_v0_embeddings`, `_last_v1_embeddings`, and `_last_comparison` on the instance. Calling `compare(A, B)` → `compare(C, D)` → `classify()` silently uses the *last* anchors with no warning.
+
+**Fix:** `classify()` should take a `Snapshot` (or a `DriftContext` object returned by `compare()`) explicitly. Eliminates a class of footguns and lets monitors be reused.
+
+### 2. `classify()` / `classify_batch()` recompute the full anchor-anchor kNN per input
+`monitor.py:330-334` does `nps_per_point(np.vstack([Z_anchor, Z_input]), ...)` over the whole matrix just to read `[-1]`. `classify_batch` repeats this in a loop (`monitor.py:429-431`). O(n²) per input.
+
+**Fix:** Compute anchor-anchor kNN once, then per-input NPS = overlap of input's k-NN in old vs new space.
+
+### 3. `beir` and `mteb` are in required `dependencies`
+`pyproject.toml:18-19`. Pulls in hundreds of MB of benchmark suites for every user just to `import semantic_sentry`.
+
+**Fix:** Move to an `[evaluation]` or `[bench]` extra.
+
+### 4. `LogisticTransfer` is not actually logistic regression
+`transfer/function.py:209-211` calls `np.linalg.lstsq` on binary targets, then applies sigmoid only at `predict()`. That's OLS on 0/1 labels.
+
+**Fix:** Either rename to `BinarizedLinearTransfer`, or fit with MLE / IRLS (scipy `optimize.minimize`).
+
+---
+
+## Correctness bugs
+
+### 5. `datetime.utcnow()` deprecation
+`core/snapshot.py:33`. Removed in Python 3.13+; project targets ≥3.10.
+
+**Fix:** `datetime.now(timezone.utc)`.
+
+### 6. Cross-tower alignment key round-trip is lossy
+`snapshot.py:122-124` saves keys as `f"{k[0]}__{k[1]}"`; `:163` loads back with `tuple(k.split("__"))`. Tower names containing `__` (e.g. `vision__patch`) break silently and reconstruct wrong pairs.
+
+**Fix:** Store keys as a list of `[name1, name2]` pairs in JSON.
+
+### 7. Silent fallbacks that mask bugs
+- `nps_per_point` returns `np.ones(n)` when `n <= k+1` (`metrics/nps.py:84-85`). Degenerate input produces a "perfect score."
+- `_compute_checkpoint_hash` hashes `type(model).__name__` when there's no `parameters`/`state_dict` (`monitor.py:264-265`). Two distinct unhashable models collide.
+- `detect_adapter` *raises* on HF and CLIP models because they need a tokenizer (`adapters/__init__.py:52-55, 79-83`). Confusing UX — auto-detection shouldn't raise; just skip those types.
+
+**Fix:** Warn or raise on degenerate inputs; don't claim to auto-detect adapters that need extra args.
+
+### 8. `_get_knn_indices` numpy path doesn't actually exclude self
+`metrics/nps.py:155-162` returns top-k including self at position 0. Caller slices `[1:k+1]` to skip it. Docstring says "excluding self" — misleading.
+
+**Fix:** Push self-exclusion into `_get_knn_indices` so both FAISS and numpy branches behave identically.
+
+### 9. `MetricRegistry` singleton has no reset
+`metrics/registry.py:32-41`. Custom metrics registered in one test leak into the next.
+
+**Fix:** Add `reset()` / `clear()` method, plus a `pytest` autouse fixture in conftest.
+
+---
+
+## Design / API
+
+### 10. `Comparison.__post_init__` mutates a frozen dataclass via `object.__setattr__`
+`core/comparison.py:65`.
+
+**Fix:** Make `severity` a `@property` computed from `global_metrics` + `thresholds`.
+
+### 11. `LinearTransfer.fit` hardcodes 3 features
+`transfer/function.py:89-90` slices `solution[:3]` / `solution[3]`. Brittle.
+
+**Fix:** Drive off `X.shape[1]`.
+
+### 12. `LogisticTransfer._extract_features` duplicates `LinearTransfer._extract_features`
+`function.py:197-204` vs `:123-145`.
+
+**Fix:** Pull up to base class or module function.
+
+### 13. `Snapshot.tower_names: tuple` and `embeddings: dict` lose generic info
+`snapshot.py:36-37`. With `mypy strict = true` in pyproject, this weakens inference.
+
+**Fix:** `tuple[str, ...]`, `dict[str, np.ndarray]`.
+
+### 14. Frozen `Snapshot` with mutable `dict` field
+Implicit `__hash__` fails because `dict` is unhashable. Breaks if used as dict key.
+
+**Fix:** `eq=False`, or implement `__hash__` from `checkpoint_hash`.
+
+### 15. Integrations layer is scaffolding only
+`integrations/__init__.py` doesn't export `ConsoleLogger`; W&B/MLflow are in `pyproject.toml` extras but have no implementation. README claims "MLOps ready."
+
+**Fix:** Ship `WandbLogger` / `MLflowLogger`, or remove the claim until they exist.
+
+### 16. `CalibrationProfile.feature_names: list[str] = None`
+`transfer/calibration.py:33`. Mutable default + wrong type.
+
+**Fix:** `Optional[list[str]] = None` with `field(default=None)`, or `field(default_factory=lambda: [...])`.
+
+---
+
+## Polish
+
+### 17. README placeholders
+`README.md:103` — `git clone https://github.com/yourusername/...`. `:123` cites placeholder URL. Line 134 has a duplicate `# semantic-sentry` header. References `LICENSE` and `CONTRIBUTING.md` files that may not exist.
+
+### 18. Examples mismatch README
+README lists `clip_drift_detection.py`; file doesn't exist.
+
+### 19. Test layout is inconsistent
+`tests/test_experiment_1.py` and `tests/test_experiment_1_smoke.py` sit at root alongside `unit/`, `integration/`, `stress/`. Move under `integration/`.
+
+### 20. No CI
+No `.github/workflows/`, no pre-commit. With ruff + mypy + pytest already configured in pyproject, one workflow buys a lot.
