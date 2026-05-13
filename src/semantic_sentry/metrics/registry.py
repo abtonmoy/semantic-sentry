@@ -3,7 +3,8 @@
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
@@ -16,9 +17,13 @@ from semantic_sentry.metrics.nps import nps
 @dataclass
 class MetricEntry:
     """Entry in the metric registry."""
-    fn: Callable[[np.ndarray, np.ndarray], float]
+    fn: Callable[..., float]
     range: tuple[float, float] | None
     description: str | None
+    # Hyperparameters baked into the registered metric. Passed as **params at
+    # call time so registered metrics can take e.g. k, n_bins, p without users
+    # threading those values through compute_all.
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 class MetricRegistry:
@@ -92,44 +97,85 @@ class MetricRegistry:
     def _internal_register(
         self,
         name: str,
-        fn: Callable[[np.ndarray, np.ndarray], float],
+        fn: Callable[..., float],
         range: tuple[float, float] | None = None,
-        description: str | None = None
+        description: str | None = None,
+        params: dict[str, Any] | None = None,
     ) -> None:
         """Internal registration without lock (for builtins during init)."""
         # Builtins are assumed valid, skip determinism check
-        self._metrics[name] = MetricEntry(fn=fn, range=range, description=description)
+        self._metrics[name] = MetricEntry(
+            fn=fn, range=range, description=description, params=dict(params or {})
+        )
 
     def register(
         self,
         name: str,
-        fn: Callable[[np.ndarray, np.ndarray], float],
+        fn: Callable[..., float],
         range: tuple[float, float] | None = None,
-        description: str | None = None
+        description: str | None = None,
+        params: dict[str, Any] | None = None,
     ) -> None:
         """Register a new metric.
 
         Args:
             name: Unique name for the metric
-            fn: Function that takes (Z0, Z1) and returns float
+            fn: Function that takes (Z0, Z1, **params) and returns float
             range: Optional (min, max) tuple for validation
             description: Optional description of the metric
+            params: Optional hyperparameter dict baked into this entry; passed
+                to ``fn`` as ``**params`` at every call site.
 
         Raises:
             MetricRegistrationError: If validation fails
         """
-        # Validate determinism
-        self._validate_determinism(fn)
+        bound_params = dict(params or {})
+
+        # Validate determinism with the same params the entry will use
+        self._validate_determinism(fn, bound_params)
 
         # Register the metric
         with self._lock:
-            self._metrics[name] = MetricEntry(fn=fn, range=range, description=description)
+            self._metrics[name] = MetricEntry(
+                fn=fn, range=range, description=description, params=bound_params
+            )
 
-    def _validate_determinism(self, fn: Callable[[np.ndarray, np.ndarray], float]) -> None:
+    def register_at_k(
+        self,
+        base_name: str,
+        fn: Callable[..., float],
+        ks: list[int],
+        range: tuple[float, float] | None = None,
+        description: str | None = None,
+        extra_params: dict[str, Any] | None = None,
+    ) -> None:
+        """Register one metric per ``k`` in ``ks``.
+
+        Produces entries named ``{base_name}_at_{k}``, each with ``params``
+        containing ``k`` (merged with any ``extra_params``). The registered
+        function must accept ``k`` as a keyword argument.
+        """
+        extras = dict(extra_params or {})
+        for k in ks:
+            entry_params = {**extras, "k": k}
+            self.register(
+                f"{base_name}_at_{k}",
+                fn,
+                range=range,
+                description=description,
+                params=entry_params,
+            )
+
+    def _validate_determinism(
+        self,
+        fn: Callable[..., float],
+        params: dict[str, Any] | None = None,
+    ) -> None:
         """Validate that a metric function is deterministic.
 
         Args:
             fn: Function to validate
+            params: Optional hyperparameters that will be passed at call time
 
         Raises:
             MetricRegistrationError: If function is not deterministic
@@ -137,11 +183,12 @@ class MetricRegistry:
         np.random.seed(42)
         Z0 = np.random.randn(50, 32).astype(np.float32)
         Z1 = np.random.randn(50, 32).astype(np.float32)
+        kwargs = dict(params or {})
 
         # Call twice with same input
         try:
-            result1 = fn(Z0, Z1)
-            result2 = fn(Z0, Z1)
+            result1 = fn(Z0, Z1, **kwargs)
+            result2 = fn(Z0, Z1, **kwargs)
         except Exception as e:
             raise MetricRegistrationError(f"Metric function raised exception: {e}") from e
 
@@ -174,7 +221,7 @@ class MetricRegistry:
         with self._lock:
             entry = self._metrics[name]
 
-        result = entry.fn(Z0, Z1)
+        result = entry.fn(Z0, Z1, **entry.params)
 
         # Validate range if specified
         if entry.range is not None:
@@ -191,7 +238,7 @@ class MetricRegistry:
         Z0: np.ndarray,
         Z1: np.ndarray,
         metric_names: list[str] | None = None,
-        parallel: bool = True
+        parallel: bool = True,
     ) -> dict[str, float]:
         """Compute all registered metrics in parallel.
 
@@ -210,11 +257,15 @@ class MetricRegistry:
 
         if not parallel or len(names) == 1:
             # Sequential computation
-            return {name: entries[name].fn(Z0, Z1) for name in names}
+            return {
+                name: entries[name].fn(Z0, Z1, **entries[name].params)
+                for name in names
+            }
 
         # Parallel computation
         def compute_one(name: str) -> tuple[str, float]:
-            return name, entries[name].fn(Z0, Z1)
+            entry = entries[name]
+            return name, entry.fn(Z0, Z1, **entry.params)
 
         with ThreadPoolExecutor(max_workers=min(len(names), 4)) as executor:
             results = list(executor.map(compute_one, names))

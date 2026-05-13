@@ -3,7 +3,7 @@
 import hashlib
 import warnings
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -12,6 +12,9 @@ from semantic_sentry.adapters.base import EncoderAdapter
 from semantic_sentry.core.classification import ClassificationResult, ConfidenceLevel
 from semantic_sentry.core.comparison import Comparison
 from semantic_sentry.core.snapshot import Snapshot
+
+if TYPE_CHECKING:
+    from semantic_sentry.core.calibration import SeverityCalibration
 from semantic_sentry.exceptions import (
     AdapterDetectionError,
     AnchorSetMismatchError,
@@ -122,6 +125,12 @@ class DriftMonitor:
         # Compute checkpoint hash from model state
         checkpoint_hash = self._compute_checkpoint_hash(model)
 
+        # H2: thread anchor-set provenance into snapshot metadata so it
+        # survives save/load and is available at compare() time.
+        snapshot_metadata: dict[str, Any] = {}
+        if anchor_set.distribution_tag:
+            snapshot_metadata["distribution_tag"] = anchor_set.distribution_tag
+
         # Create snapshot
         snapshot = Snapshot(
             model_id=self._get_model_id(model),
@@ -131,6 +140,7 @@ class DriftMonitor:
             tower_names=tuple(tower_names),
             embeddings=embeddings_dict,
             cross_tower_alignment=cross_tower_alignment,
+            metadata=snapshot_metadata,
         )
 
         return snapshot
@@ -139,14 +149,26 @@ class DriftMonitor:
         self,
         snapshot_v0: Snapshot,
         snapshot_v1: Snapshot,
-        per_tower: bool = True
+        per_tower: bool = True,
+        d_snapshot_v0: Snapshot | None = None,
+        d_snapshot_v1: Snapshot | None = None,
+        calibration: "SeverityCalibration | None" = None,
     ) -> Comparison:
         """Compare two snapshots and compute drift metrics.
 
         Args:
-            snapshot_v0: Base snapshot
-            snapshot_v1: Updated snapshot
+            snapshot_v0: Base snapshot (Q-side, when paired with d_snapshot_*)
+            snapshot_v1: Updated snapshot (Q-side, when paired with d_snapshot_*)
             per_tower: Whether to compute per-tower metrics for multi-tower models
+            d_snapshot_v0: Optional D-side baseline snapshot. When provided
+                together with ``d_snapshot_v1``, the behavioral registry
+                (lib_enhancement Family A) is evaluated and its results
+                merged into ``global_metrics`` under their registered names.
+                Both Q-snapshots must have role ``"Q"`` and both D-snapshots
+                must have role ``"D"`` from the same partition (enforced via
+                composite anchor_set_version hashes from ``AnchorSet.partition``).
+            d_snapshot_v1: Optional D-side updated snapshot, paired with
+                ``d_snapshot_v0``.
 
         Returns:
             Comparison result with drift metrics
@@ -155,12 +177,30 @@ class DriftMonitor:
             AnchorSetMismatchError: If snapshots use different anchor sets
             TowerMismatchError: If snapshots have different tower counts/names
             EmbeddingDimError: If embeddings have different dimensions
+            ValueError: If only one of ``d_snapshot_v0``/``d_snapshot_v1`` provided
         """
+        if (d_snapshot_v0 is None) ^ (d_snapshot_v1 is None):
+            raise ValueError(
+                "d_snapshot_v0 and d_snapshot_v1 must both be provided or both omitted"
+            )
         # Validate anchor set version
         if snapshot_v0.anchor_set_version != snapshot_v1.anchor_set_version:
             raise AnchorSetMismatchError(
                 f"Snapshots captured with different anchor sets: "
                 f"{snapshot_v0.anchor_set_version} vs {snapshot_v1.anchor_set_version}"
+            )
+
+        # H2: validate anchor-distribution provenance matches. Snapshots from
+        # different anchor distributions are categorically not comparable —
+        # §5.2 showed 2.3x NPS magnitude differences between training-dist and
+        # OOD anchors. Allow comparison if neither side declared a tag (legacy
+        # behavior) but reject any mismatch where at least one side has one.
+        v0_tag = snapshot_v0.metadata.get("distribution_tag", "")
+        v1_tag = snapshot_v1.metadata.get("distribution_tag", "")
+        if v0_tag != v1_tag:
+            raise AnchorSetMismatchError(
+                f"Anchor distribution tag mismatch: "
+                f"v0='{v0_tag}' vs v1='{v1_tag}'"
             )
 
         # Validate tower structure
@@ -195,6 +235,34 @@ class DriftMonitor:
 
         global_metrics = self._metric_registry.compute_all(Z0_global, Z1_global)
 
+        # Behavioral metrics (lib_enhancement A1-A5): require D-side snapshots
+        # to compute (q, d) score-distribution / ranking drift. They live in a
+        # separate registry because their signature is (Z0_Q, Z1_Q, D0, D1, ...).
+        if d_snapshot_v0 is not None and d_snapshot_v1 is not None:
+            # Anchor-set version coupling: both D snapshots must come from the
+            # paired partition of the same parent set.
+            if d_snapshot_v0.anchor_set_version != d_snapshot_v1.anchor_set_version:
+                raise AnchorSetMismatchError(
+                    f"D-side anchor set version mismatch: "
+                    f"{d_snapshot_v0.anchor_set_version} vs "
+                    f"{d_snapshot_v1.anchor_set_version}"
+                )
+            from semantic_sentry.metrics.behavioral import get_behavioral_registry
+            behavioral_registry = get_behavioral_registry()
+            if behavioral_registry.list_metrics():
+                D0_global = np.concatenate(
+                    [d_snapshot_v0.get_tower(name) for name in d_snapshot_v0.tower_names],
+                    axis=1,
+                )
+                D1_global = np.concatenate(
+                    [d_snapshot_v1.get_tower(name) for name in d_snapshot_v1.tower_names],
+                    axis=1,
+                )
+                behavioral_metrics = behavioral_registry.compute_all(
+                    Z0_global, Z1_global, D0_global, D1_global
+                )
+                global_metrics.update(behavioral_metrics)
+
         # Compute per-tower metrics if requested and multi-tower
         per_tower_metrics = None
         if per_tower and snapshot_v0.is_multi_tower:
@@ -214,6 +282,18 @@ class DriftMonitor:
                 v1_value = snapshot_v1.cross_tower_alignment.get(pair, 0.0)
                 alignment_deltas[pair] = v1_value - v0_value
 
+        # H2: thread distribution_tag through to Comparison.metadata so
+        # downstream consumers (calibration, dashboards) can see anchor
+        # provenance.
+        comparison_metadata: dict[str, Any] = {}
+        if v0_tag:
+            comparison_metadata["distribution_tag"] = v0_tag
+
+        # I2: pass calibration-derived thresholds (if any) into Comparison so
+        # severity is computed against the noise-floor bands instead of the
+        # hard-coded defaults.
+        thresholds_arg = dict(calibration.thresholds) if calibration is not None else {}
+
         # Create comparison
         comparison = Comparison(
             snapshot_v0_hash=snapshot_v0.checkpoint_hash,
@@ -221,6 +301,8 @@ class DriftMonitor:
             global_metrics=global_metrics,
             per_tower_metrics=per_tower_metrics,
             alignment_deltas=alignment_deltas,
+            thresholds=thresholds_arg,
+            metadata=comparison_metadata,
         )
 
         # Store for later use

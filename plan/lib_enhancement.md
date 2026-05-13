@@ -44,34 +44,34 @@ The new family. Captures how the model's *scoring behavior* shifts across pair-o
 
 Requires **Q/D anchor partitioning** (see H1) — split the anchor set into a query subset and document subset (default 50/50 with fixed seed).
 
-### - [ ] A1. Score-distribution JSD
+### - [x] A1. Score-distribution JSD
 - **What:** Jensen–Shannon divergence between the distribution of pairwise cosine similarities `S_M(q,d)` in Z0 vs Z1, marginalized over (q,d) pairs.
 - **Rationale:** Catches global score-calibration shifts (e.g., the whole score distribution flattens or shifts left under anti-aligned drift). Symmetric, bounded in [0, log 2].
 - **Tags:** [paper] [lib] [mlops]
 - **Cost:** O(n²·d) for the |Q|×|D| similarity matrix per snapshot; O(n²) for the histogram + JSD.
 - **Notes:** Histogram bin count is a hyperparameter (default 100). Robust to label-free use.
 
-### - [ ] A2. Mean absolute pointwise score change
+### - [x] A2. Mean absolute pointwise score change
 - **What:** `(1/|Q||D|) · Σ |S_baseline(q,d) − S_updated(q,d)|`, normalized by baseline scale.
 - **Rationale:** Cheaper sibling to JSD, captures pointwise (not just distributional) score drift. Useful when you want a single interpretable number ("scores moved by 0.07 on average").
 - **Tags:** [paper] [lib] [mlops]
 - **Cost:** O(n²·d) for similarity matrices; O(n²) for the sum.
 
-### - [ ] A3. Per-query Rank-Biased Overlap (RBO)
+### - [x] A3. Per-query Rank-Biased Overlap (RBO)
 - **What:** For each query q, RBO between baseline and updated ranking of D. Return mean across queries.
 - **Rationale:** Top-weighted ranking metric — disagreement at rank 1 costs more than at rank 100. Matches what retrieval users actually care about. Bounded [0, 1].
 - **Tags:** [paper] [lib] [mlops]
 - **Cost:** O(|Q|·|D|·log|D|) ranking + O(|Q|·|D|) RBO.
 - **Notes:** Persistence parameter `p` (typically 0.9) is a hyperparameter. RBO is preferred over Kendall τ because it's top-heavy and handles disjoint tails.
 
-### - [ ] A4. Per-query Kendall τ
+### - [x] A4. Per-query Kendall τ
 - **What:** For each query q, Kendall τ between baseline and updated ranking of D. Return mean.
 - **Rationale:** Standard rank-correlation; familiar to reviewers. Pairs with RBO — τ captures whole-list correlation, RBO captures top-list overlap.
 - **Tags:** [paper] [lib]
 - **Cost:** O(|Q|·|D|·log|D|) via Knight's algorithm.
 - **Notes:** Less informative than RBO when only top results matter. Worth including for credibility.
 
-### - [ ] A5. Self-retrieval top-k consistency
+### - [x] A5. Self-retrieval top-k consistency
 - **What:** For each anchor `i`, find its top-k nearest neighbors in Z0 and in Z1. Report fraction of anchors where the top-k *sets* match exactly (k=1, 5, 10).
 - **Rationale:** Most interpretable metric in the suite. Maps directly to retrieval-task degradation: "X% of queries would return a different top-1 result." Strong dashboard candidate.
 - **Tags:** [paper] [lib] [mlops]
@@ -105,13 +105,13 @@ Requires **Q/D anchor partitioning** (see H1) — split the anchor set into a qu
 
 Extends NPS along the local-neighborhood axis. B1+B2 are the asymmetric decomposition that could discriminate regimes; the rest are robustness improvements.
 
-### - [ ] B1. Trustworthiness (priority)
+### - [x] B1. Trustworthiness (priority)
 - **What:** For each point, penalize neighbors in Z1's top-k that were *not* in Z0's top-k (false neighbors introduced).
 - **Rationale:** Half of the directional NPS decomposition. Anti-aligned drift may introduce more false neighbors (retrieval picks up garbage); aligned drift may not. Falsifiable test for §3.3 attack #3.
 - **Tags:** [paper] [lib] [mlops]
 - **Cost:** Same as NPS — O(n²) or FAISS-accelerated.
 
-### - [ ] B2. Continuity (priority)
+### - [x] B2. Continuity (priority)
 - **What:** For each point, penalize neighbors in Z0's top-k that are *not* in Z1's top-k (true neighbors lost).
 - **Rationale:** Other half of the directional decomposition. Aligned drift may lose more true neighbors (model has *intentionally* reshaped); anti-aligned may not.
 - **Tags:** [paper] [lib] [mlops]
@@ -130,7 +130,7 @@ Extends NPS along the local-neighborhood axis. B1+B2 are the asymmetric decompos
 - **Tags:** [lib]
 - **Cost:** O(n²) for full rank lists.
 
-### - [ ] B5. NPS curve (multi-k)
+### - [x] B5. NPS curve (multi-k)
 - **What:** NPS evaluated at k ∈ {1, 5, 10, 25, 50, 100}.
 - **Rationale:** Drift can be scale-dependent. The §6.2 sanity check shows 4.6 pp spread across k — that's signal, not noise. Reveals which scale of local structure the drift affected.
 - **Tags:** [paper] [lib]
@@ -276,20 +276,20 @@ Tests whether the marginal embedding distribution shifted. None attacks §3.3 di
 
 Not metrics themselves — they *wrap* any registered metric to produce time-series signals. From Fardini Doc 1. F3 / F5 are the operational and paper-relevant pieces.
 
-### - [ ] F1. Velocity wrapper
+### - [x] F1. Velocity wrapper
 - **What:** Given a sequence of snapshots and a metric M, compute `dM/dt` via central differences normalized for unequal checkpoint spacing.
 - **Rationale:** Reveals when geometry is moving fastest. The §4.3.1 trajectory peaks at epochs 1→3 — invisible to value-only NPS.
 - **Tags:** [paper] [lib] [mlops]
 - **Cost:** O(T) per trajectory, where T = number of checkpoints.
 - **Notes:** API: `Velocity(metric_name)` returns a function `(snapshots, times) → np.ndarray`.
 
-### - [ ] F2. Acceleration wrapper
+### - [x] F2. Acceleration wrapper
 - **What:** Second finite difference, `d²M/dt²`.
 - **Rationale:** Detects deceleration toward plateau, re-acceleration, oscillation.
 - **Tags:** [paper] [lib]
 - **Cost:** O(T) post-velocity.
 
-### - [ ] F3. Plateau detector (priority)
+### - [x] F3. Plateau detector (priority)
 - **What:** Boolean signal: `|velocity| < ε AND |acceleration| < δ for k consecutive checkpoints`.
 - **Rationale:** **Highest-ROI library addition.** The §4.3.1 data shows the MLM run is essentially settled by epoch 10 — 97% of geometric change at 20% of compute. Production training loops can save real money. Fardini Doc 1 §4.1.
 - **Tags:** [paper] [lib] [mlops]
@@ -316,13 +316,13 @@ Not metrics themselves — they *wrap* any registered metric to produce time-ser
 
 The current `MetricRegistry` (`metrics/registry.py`) needs four upgrades to support Families A–F cleanly.
 
-### - [ ] G1. Hyperparameter dict on `MetricEntry`
+### - [x] G1. Hyperparameter dict on `MetricEntry`
 - **What:** Add optional `params: dict` field. Registry calls `fn(Z0, Z1, **entry.params)`.
 - **Why:** Families A (Q/D split, RBO persistence), C (CKA bandwidth), E (MMD kernel, SW projections) all need configurable hyperparameters that should be recorded in calibration profiles for reproducibility.
 - **API impact:** Backward-compatible — defaults to `{}`. `register(name, fn, params={...})`.
 - **Tags:** [lib]
 
-### - [ ] G2. Multi-k registration helper
+### - [x] G2. Multi-k registration helper
 - **What:** `register_at_k(base_name, fn, ks=[1, 5, 10, 25, 50])` — registers one metric per k value.
 - **Why:** B5 (NPS curve), A5 (top-k consistency), and several Family B metrics need this idiom.
 - **Tags:** [lib]
@@ -332,7 +332,7 @@ The current `MetricRegistry` (`metrics/registry.py`) needs four upgrades to supp
 - **Why:** Family E (MMD, SW), Family A (any randomized projection variants), Family F4 (regression bootstrap CIs).
 - **Tags:** [lib]
 
-### - [ ] G4. Temporal wrapper for any base metric
+### - [x] G4. Temporal wrapper for any base metric
 - **What:** `register_with_temporal(name, fn)` registers `{name, name_velocity, name_acceleration}` automatically. The temporal versions accept `list[Snapshot]` + `list[float]` (times) and return per-checkpoint arrays.
 - **Why:** Family F is a meta-feature; this exposes it as first-class API rather than a special case in user code.
 - **Tags:** [lib] [paper]
@@ -348,12 +348,12 @@ The current `MetricRegistry` (`metrics/registry.py`) needs four upgrades to supp
 
 Family A requires Q/D partitioning. Family A7 requires labeled paraphrase pairs. §5.2 establishes that anchor-set distribution matters and current handling is implicit. Make all this explicit.
 
-### - [ ] H1. Q/D partitioning on `AnchorSet` (priority)
+### - [x] H1. Q/D partitioning on `AnchorSet` (priority)
 - **What:** Add `partition(ratio=0.5, seed=0) → (AnchorSet_Q, AnchorSet_D)` method. Result is reproducible (seeded), hashed into `version_hash` so paired snapshots can verify they used the same split.
 - **Why:** All of Family A depends on this. Without it, behavioral metrics can't be computed.
 - **Tags:** [paper] [lib]
 
-### - [ ] H2. Anchor-distribution provenance tagging
+### - [x] H2. Anchor-distribution provenance tagging
 - **What:** Add `distribution_tag: str` field to `AnchorSet` (e.g., `"training-dist"` / `"OOD"` / `"deployment-prod"`). `Comparison` carries this through.
 - **Why:** §5.2 demonstrated 2.3× NPS magnitude difference between training-dist and OOD anchors on the same checkpoint. Without provenance, cross-experiment comparisons silently misalign.
 - **Tags:** [lib] [mlops]
@@ -380,7 +380,7 @@ The current severity scale uses fixed thresholds (`comparison.py:42-49`); §7.5 
 - **Tags:** [paper]
 - **Notes:** See `paper_extention.md` Experiment 6 for the calibration protocol.
 
-### - [ ] I2. Multi-seed noise-floor severity calibration
+### - [x] I2. Multi-seed noise-floor severity calibration
 - **What:** Replace hard-coded severity thresholds with `calibrate_thresholds(reference_snapshots: list[Snapshot])` that derives LOW/MEDIUM/HIGH/CRITICAL boundaries from the std of multi-seed reference runs.
 - **Why:** §7.5 action item. The current `NPS > 0.95 = LOW` threshold doesn't reflect that CLIP has σ ≈ 0.018 across seeds while E5 has σ ≈ 0.002 — same threshold means different things for different model families.
 - **Tags:** [lib] [mlops]
@@ -398,25 +398,42 @@ The current severity scale uses fixed thresholds (`comparison.py:42-49`); §7.5 
 
 **Goal:** ship everything needed for `paper_extention.md` experiments + the high-ROI MLOps additions.
 
-- [ ] **G1** — Hyperparameter dict (prerequisite for A, C, E)
-- [ ] **G2** — Multi-k registration helper
-- [ ] **H1** — Q/D partitioning (prerequisite for Family A)
-- [ ] **H2** — Anchor-distribution provenance tagging
-- [ ] **A1** — Score-distribution JSD
-- [ ] **A2** — Mean abs pointwise score Δ
-- [ ] **A3** — Per-query RBO
-- [ ] **A4** — Per-query Kendall τ
-- [ ] **A5** — Self-retrieval top-k consistency
-- [ ] **B1** — Trustworthiness
-- [ ] **B2** — Continuity
-- [ ] **B5** — NPS curve (multi-k)
-- [ ] **F1** — Velocity wrapper
-- [ ] **F2** — Acceleration wrapper
-- [ ] **F3** — Plateau detector
-- [ ] **G4** — Temporal wrapper for any base metric
-- [ ] **I2** — Multi-seed noise-floor severity calibration
+- [x] **G1** — Hyperparameter dict (prerequisite for A, C, E)
+- [x] **G2** — Multi-k registration helper
+- [x] **H1** — Q/D partitioning (prerequisite for Family A)
+- [x] **H2** — Anchor-distribution provenance tagging
+- [x] **A1** — Score-distribution JSD
+- [x] **A2** — Mean abs pointwise score Δ
+- [x] **A3** — Per-query RBO
+- [x] **A4** — Per-query Kendall τ
+- [x] **A5** — Self-retrieval top-k consistency
+- [x] **B1** — Trustworthiness
+- [x] **B2** — Continuity
+- [x] **B5** — NPS curve (multi-k)
+- [x] **F1** — Velocity wrapper
+- [x] **F2** — Acceleration wrapper
+- [x] **F3** — Plateau detector
+- [x] **G4** — Temporal wrapper for any base metric
+- [x] **I2** — Multi-seed noise-floor severity calibration
 
 That's 17 items. Each ~30–200 LOC. Realistic for v0.2.
+
+**v0.2 status: complete.** All 17 items landed in `src/semantic_sentry/` with 67 new
+unit tests (194/194 unit suite passing, `ruff` clean). Highlights:
+
+- Behavioral metrics (A1–A5) live in a separate `BehavioralMetricRegistry`
+  (`src/semantic_sentry/metrics/behavioral.py`) — their `(Z0_Q, Z1_Q, D0, D1)`
+  signature can't share the regular registry's `(Z0, Z1)` contract.
+- Temporal layer (F1–F3, G4) lives in `src/semantic_sentry/metrics/temporal.py`
+  as a module-level dict, also for signature reasons (`(snapshots, times, name)`).
+- `AnchorSet.partition(seed)` uses composite version hashes
+  `{parent_hash}:{role}:{seed}` so paired Q/D snapshots cross-verify in
+  `DriftMonitor.compare` (mismatched role or seed raises).
+- I2 severity calibration: `calibrate_thresholds(reference_snapshots)` returns
+  a `SeverityCalibration` accepted by `DriftMonitor.compare(calibration=...)`
+  via the existing `Comparison.thresholds` override path.
+- Plus `ConsoleLogger` is now exported from `semantic_sentry.integrations`
+  (was already implemented but unreachable).
 
 ## v0.3 — Library robustness
 
