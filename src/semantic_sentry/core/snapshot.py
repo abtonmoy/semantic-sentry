@@ -85,13 +85,13 @@ class Snapshot:
 
     def get_tower(self, name: str) -> np.ndarray:
         """Get embedding matrix for a named tower.
-        
+
         Args:
             name: Tower name
-            
+
         Returns:
             Embedding matrix of shape (n, d)
-            
+
         Raises:
             KeyError: If tower name not found
         """
@@ -101,12 +101,12 @@ class Snapshot:
 
     def save(self, path: str | Path) -> None:
         """Save snapshot to directory.
-        
+
         Creates directory structure:
             path/
                 metadata.json
                 {tower_name}.safetensors  (one per tower)
-        
+
         Args:
             path: Directory path to save to
         """
@@ -143,13 +143,13 @@ class Snapshot:
     @classmethod
     def load(cls, path: str | Path) -> "Snapshot":
         """Load snapshot from directory.
-        
+
         Args:
             path: Directory path to load from
-            
+
         Returns:
             Loaded Snapshot
-            
+
         Raises:
             SnapshotCorruptionError: If integrity check fails
         """

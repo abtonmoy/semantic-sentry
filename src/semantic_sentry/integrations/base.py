@@ -9,7 +9,7 @@ from semantic_sentry.core.comparison import Comparison
 
 class DriftLogger(ABC):
     """Abstract base class for drift logging integrations.
-    
+
     Implementations can log drift metrics to various backends
     (Weights & Biases, MLflow, webhooks, etc.).
     """
@@ -17,7 +17,7 @@ class DriftLogger(ABC):
     @abstractmethod
     def log_comparison(self, comparison: Comparison, step: int | None = None) -> None:
         """Log a comparison result.
-        
+
         Args:
             comparison: Comparison result to log
             step: Optional step number
@@ -31,7 +31,7 @@ class DriftLogger(ABC):
         input_id: str | None = None
     ) -> None:
         """Log a classification result.
-        
+
         Args:
             result: Classification result to log
             input_id: Optional identifier for the input
@@ -41,7 +41,7 @@ class DriftLogger(ABC):
     @abstractmethod
     def log_report(self, report: dict[str, Any]) -> None:
         """Log a drift report.
-        
+
         Args:
             report: Report dictionary
         """
@@ -66,7 +66,7 @@ class ConsoleLogger(DriftLogger):
 
     def __init__(self, verbose: bool = True):
         """Initialize console logger.
-        
+
         Args:
             verbose: Whether to print detailed logs
         """

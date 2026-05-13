@@ -15,7 +15,7 @@ class ConfidenceLevel(Enum):
 @dataclass(frozen=True)
 class ClassificationResult:
     """Result of drift-aware classification.
-    
+
     Attributes:
         label: Predicted label
         confidence: Confidence level (HIGH, MEDIUM, LOW)

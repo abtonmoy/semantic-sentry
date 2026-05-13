@@ -5,7 +5,7 @@ import numpy as np
 
 class NPSBound:
     """Theoretical bounds on downstream task degradation from NPS drop.
-    
+
     These bounds provide theoretical guarantees on worst-case degradation
     based on the Neighborhood Preservation Score.
     """
@@ -13,12 +13,12 @@ class NPSBound:
     @staticmethod
     def lower_bound(nps_score: float) -> float:
         """Theoretical lower bound on retrieval degradation from NPS drop.
-        
+
         The bound is: degradation >= 1 - NPS
-        
+
         Args:
             nps_score: NPS score in [0, 1]
-            
+
         Returns:
             Lower bound on degradation in [0, 1]
         """
@@ -28,13 +28,13 @@ class NPSBound:
     @staticmethod
     def upper_bound(nps_score: float, k: int = 10) -> float:
         """Theoretical upper bound on retrieval degradation.
-        
+
         This is a looser bound that accounts for the k-NN structure.
-        
+
         Args:
             nps_score: NPS score in [0, 1]
             k: Number of neighbors considered
-            
+
         Returns:
             Upper bound on degradation in [0, 1]
         """
@@ -49,12 +49,12 @@ class NPSBound:
         confidence: float = 0.95
     ) -> tuple[float, float]:
         """Compute confidence interval for NPS-based degradation bound.
-        
+
         Args:
             nps_score: Observed NPS score
             nps_samples: Number of samples used to compute NPS
             confidence: Confidence level (default: 0.95)
-            
+
         Returns:
             (lower_bound, upper_bound) tuple
         """
@@ -62,10 +62,7 @@ class NPSBound:
         point_est = 1.0 - nps_score
 
         # Standard error (binomial approximation)
-        if n_samples > 0:
-            se = np.sqrt(nps_score * (1 - nps_score) / n_samples)
-        else:
-            se = 0.0
+        se = np.sqrt(nps_score * (1 - nps_score) / n_samples) if n_samples > 0 else 0.0
 
         # Confidence interval (using normal approximation)
         z = 1.96 if confidence == 0.95 else 2.58  # 95% or 99%
@@ -83,12 +80,12 @@ def retrieval_recall_at_k_bound(
     k: int = 10
 ) -> float:
     """Bound on retrieval recall given NPS score.
-    
+
     Args:
         nps_score: NPS score
         baseline_recall: Baseline recall@k on clean data
         k: Number of neighbors
-        
+
     Returns:
         Lower bound on recall@k after drift
     """
@@ -102,11 +99,11 @@ def classification_accuracy_bound(
     baseline_accuracy: float
 ) -> float:
     """Bound on classification accuracy given NPS score.
-    
+
     Args:
         nps_score: NPS score
         baseline_accuracy: Baseline accuracy on clean data
-        
+
     Returns:
         Lower bound on accuracy after drift
     """

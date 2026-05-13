@@ -61,11 +61,11 @@ def isotropy(Z: np.ndarray) -> float:
 
 def isotropy_delta(Z0: np.ndarray, Z1: np.ndarray) -> float:
     """Compute change in isotropy between two embedding spaces.
-    
+
     Args:
         Z0: First embedding matrix of shape (n, d0)
         Z1: Second embedding matrix of shape (n, d1)
-        
+
     Returns:
         Delta isotropy in [-1, 1], where:
             - Positive: Z1 is more isotropic than Z0
@@ -80,11 +80,11 @@ def isotropy_delta(Z0: np.ndarray, Z1: np.ndarray) -> float:
 
 def effective_dimensionality(Z: np.ndarray, threshold: float = 0.9) -> int:
     """Compute effective dimensionality using participation ratio.
-    
+
     Args:
         Z: Embedding matrix of shape (n, d)
         threshold: Variance threshold for dimensionality calculation
-        
+
     Returns:
         Effective dimensionality (integer)
     """

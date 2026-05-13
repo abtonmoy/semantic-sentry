@@ -12,7 +12,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -26,7 +25,7 @@ class TestExperiment1Imports(unittest.TestCase):
     def test_import_experiment_module(self):
         """Test that experiment_1_full_finetune.py can be imported."""
         try:
-            from experiments import experiment_1_full_finetune
+            from experiments import experiment_1_full_finetune  # noqa: F401
             self.assertTrue(True)
         except ImportError as e:
             self.fail(f"Failed to import experiment_1_full_finetune: {e}")
@@ -34,10 +33,10 @@ class TestExperiment1Imports(unittest.TestCase):
     def test_key_functions_exist(self):
         """Test that key functions are defined."""
         from experiments.experiment_1_full_finetune import (
+            SimpleImageCaptionDataset,
             download_mscoco,
             evaluate_retrieval,
             run_experiment,
-            SimpleImageCaptionDataset,
         )
         self.assertTrue(callable(download_mscoco))
         self.assertTrue(callable(evaluate_retrieval))
@@ -271,7 +270,6 @@ class TestCommandLineInterface(unittest.TestCase):
 
     def test_argument_parsing(self):
         """Test that CLI arguments are parsed correctly."""
-        from experiments.experiment_1_full_finetune import run_experiment
         import argparse
 
         # Test default values

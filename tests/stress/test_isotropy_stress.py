@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from semantic_sentry.metrics.isotropy import isotropy, isotropy_delta, effective_dimensionality
+from semantic_sentry.metrics.isotropy import effective_dimensionality, isotropy, isotropy_delta
 
 
 @pytest.mark.stress

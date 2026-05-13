@@ -50,18 +50,22 @@ def detect_adapter(model) -> EncoderAdapter:
         AdapterDetectionError: If no adapter at all matches the model type.
     """
     import logging
+
     from semantic_sentry.exceptions import AdapterDetectionError
 
     log = logging.getLogger(__name__)
 
     # CLIP — needs tokenizer + preprocess; cannot be auto-constructed.
-    if CLIPAdapter is not None:
-        if hasattr(model, 'encode_image') and hasattr(model, 'encode_text'):
-            log.debug(
-                "detect_adapter: model looks like a CLIP model but CLIPAdapter "
-                "needs a tokenizer + preprocess; skipping auto-detection. "
-                "Use CLIPAdapter(model, tokenizer, preprocess) directly."
-            )
+    if (
+        CLIPAdapter is not None
+        and hasattr(model, 'encode_image')
+        and hasattr(model, 'encode_text')
+    ):
+        log.debug(
+            "detect_adapter: model looks like a CLIP model but CLIPAdapter "
+            "needs a tokenizer + preprocess; skipping auto-detection. "
+            "Use CLIPAdapter(model, tokenizer, preprocess) directly."
+        )
 
     # SentenceTransformer — fully constructible from the model alone.
     if SentenceTransformerAdapter is not None:

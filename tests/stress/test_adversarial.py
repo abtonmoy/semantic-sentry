@@ -3,10 +3,10 @@
 import numpy as np
 import pytest
 
-from semantic_sentry.metrics.cka import linear_cka
-from semantic_sentry.metrics.nps import nps
 from semantic_sentry.core.snapshot import Snapshot
 from semantic_sentry.exceptions import SnapshotCorruptionError
+from semantic_sentry.metrics.cka import linear_cka
+from semantic_sentry.metrics.nps import nps
 
 
 @pytest.mark.stress
@@ -22,7 +22,7 @@ class TestAdversarial:
         Z_rotated = Z @ Q
 
         cka_val = linear_cka(Z, Z_rotated)
-        nps_val = nps(Z, Z_rotated, k=10)
+        nps(Z, Z_rotated, k=10)
 
         assert cka_val > 0.99, f"CKA should be ~1.0 after rotation, got {cka_val}"
         # NPS may or may not change depending on rotation — this is the key test
@@ -71,7 +71,6 @@ class TestAdversarial:
 
     def test_adv_006_truncated_snapshot(self, make_embeddings, tmp_path):
         """ADV-006: Truncated snapshot file must raise error."""
-        import json
         from datetime import datetime, timezone
 
         Z = make_embeddings(50, 32)

@@ -7,7 +7,6 @@ import numpy as np
 
 from semantic_sentry.core.comparison import Comparison
 
-
 # Feature order used by every concrete TransferFunction in this module.
 # Kept as a module-level constant so the wider repo can ship a single
 # feature_names list with calibration profiles.
@@ -56,10 +55,10 @@ class TransferFunction(ABC):
 
 class LinearTransfer(TransferFunction):
     """Linear transfer function using OLS regression.
-    
+
     Features: [1-CKA, 1-NPS, |isotropy_delta|]
     Target: Downstream task degradation
-    
+
     Example:
         transfer = LinearTransfer()
         transfer.fit(calibration_comparisons, calibration_degradations)
@@ -75,17 +74,18 @@ class LinearTransfer(TransferFunction):
 
     def fit(self, comparisons: list[Comparison], degradations: list[float]) -> None:
         """Fit linear transfer function.
-        
+
         Args:
             comparisons: List of comparison results
             degradations: List of measured degradations
-            
+
         Raises:
             ValueError: If input lengths don't match or too few samples
         """
         if len(comparisons) != len(degradations):
             raise ValueError(
-                f"Length mismatch: {len(comparisons)} comparisons vs {len(degradations)} degradations"
+                f"Length mismatch: {len(comparisons)} comparisons "
+                f"vs {len(degradations)} degradations"
             )
 
         if len(comparisons) < 3:
@@ -115,13 +115,13 @@ class LinearTransfer(TransferFunction):
 
     def predict(self, comparison: Comparison) -> float:
         """Predict downstream degradation.
-        
+
         Args:
             comparison: Comparison result
-            
+
         Returns:
             Predicted degradation
-            
+
         Raises:
             ValueError: If not fitted
         """
@@ -150,19 +150,19 @@ class LinearTransfer(TransferFunction):
 
         return {
             name: float(abs(weight))
-            for name, weight in zip(TRANSFER_FEATURE_NAMES, self.weights)
+            for name, weight in zip(TRANSFER_FEATURE_NAMES, self.weights, strict=False)
         }
 
 
 class LogisticTransfer(TransferFunction):
     """Logistic transfer function for binary degradation prediction.
-    
+
     Predicts probability of significant degradation (> threshold).
     """
 
     def __init__(self, degradation_threshold: float = 0.1):
         """Initialize logistic transfer function.
-        
+
         Args:
             degradation_threshold: Threshold for significant degradation
         """
@@ -173,7 +173,7 @@ class LogisticTransfer(TransferFunction):
 
     def fit(self, comparisons: list[Comparison], degradations: list[float]) -> None:
         """Fit logistic transfer function.
-        
+
         Args:
             comparisons: List of comparison results
             degradations: List of measured degradations
@@ -256,14 +256,14 @@ class LogisticTransfer(TransferFunction):
 
 def create_transfer_function(method: str = "linear", **kwargs) -> TransferFunction:
     """Factory function to create transfer functions.
-    
+
     Args:
         method: Transfer function type ('linear' or 'logistic')
         **kwargs: Additional arguments for the transfer function
-        
+
     Returns:
         TransferFunction instance
-        
+
     Raises:
         ValueError: If method is unknown
     """

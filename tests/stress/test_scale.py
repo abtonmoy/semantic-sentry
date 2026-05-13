@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 
 from semantic_sentry.metrics.cka import linear_cka
-from semantic_sentry.metrics.nps import nps
 from semantic_sentry.metrics.isotropy import isotropy_delta
+from semantic_sentry.metrics.nps import nps
 
 
 @pytest.mark.stress

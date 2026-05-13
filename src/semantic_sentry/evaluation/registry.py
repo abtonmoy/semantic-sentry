@@ -18,11 +18,11 @@ class Evaluator(ABC):
         anchor_set: AnchorSet
     ) -> float:
         """Evaluate performance on a snapshot.
-        
+
         Args:
             snapshot: Model snapshot
             anchor_set: Anchor set with labels
-            
+
         Returns:
             Performance score (higher is better)
         """
@@ -35,12 +35,12 @@ class Evaluator(ABC):
         anchor_set: AnchorSet
     ) -> float:
         """Evaluate performance delta between snapshots.
-        
+
         Args:
             snapshot_v0: Base snapshot
             snapshot_v1: Updated snapshot
             anchor_set: Anchor set with labels
-            
+
         Returns:
             Performance delta (negative means degradation)
         """
@@ -58,7 +58,7 @@ class EvaluatorRegistry:
 
     def register(self, name: str, evaluator: Evaluator) -> None:
         """Register an evaluator.
-        
+
         Args:
             name: Evaluator name
             evaluator: Evaluator instance
@@ -67,10 +67,10 @@ class EvaluatorRegistry:
 
     def get(self, name: str) -> Evaluator:
         """Get evaluator by name.
-        
+
         Args:
             name: Evaluator name
-            
+
         Returns:
             Evaluator instance
         """
@@ -78,7 +78,7 @@ class EvaluatorRegistry:
 
     def list_evaluators(self) -> list[str]:
         """List registered evaluators.
-        
+
         Returns:
             List of evaluator names
         """
@@ -90,7 +90,7 @@ class RetrievalEvaluator(Evaluator):
 
     def __init__(self, k: int = 10):
         """Initialize retrieval evaluator.
-        
+
         Args:
             k: Number of neighbors to consider
         """
@@ -102,13 +102,13 @@ class RetrievalEvaluator(Evaluator):
         anchor_set: AnchorSet
     ) -> float:
         """Evaluate retrieval performance using MRR@k.
-        
+
         For each query, find its position in k-NN results.
-        
+
         Args:
             snapshot: Model snapshot
             anchor_set: Anchor set
-            
+
         Returns:
             Mean Reciprocal Rank
         """
@@ -144,7 +144,7 @@ class ClassificationEvaluator(Evaluator):
 
     def __init__(self, k: int = 5):
         """Initialize classification evaluator.
-        
+
         Args:
             k: Number of neighbors for k-NN
         """
@@ -156,11 +156,11 @@ class ClassificationEvaluator(Evaluator):
         anchor_set: AnchorSet
     ) -> float:
         """Evaluate classification accuracy using k-NN.
-        
+
         Args:
             snapshot: Model snapshot
             anchor_set: Anchor set with labels
-            
+
         Returns:
             Classification accuracy
         """

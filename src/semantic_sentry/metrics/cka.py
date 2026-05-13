@@ -77,10 +77,10 @@ def linear_cka(Z0: np.ndarray, Z1: np.ndarray) -> float:
 
 def center_gram(K: np.ndarray) -> np.ndarray:
     """Center a Gram matrix.
-    
+
     Args:
         K: Gram matrix of shape (n, n)
-        
+
     Returns:
         Centered Gram matrix
     """

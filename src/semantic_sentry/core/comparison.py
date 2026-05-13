@@ -16,7 +16,7 @@ class AlertSeverity(Enum):
 @dataclass(frozen=True)
 class Comparison:
     """Frozen comparison result between two snapshots.
-    
+
     Attributes:
         snapshot_v0_hash: Hash of base snapshot
         snapshot_v1_hash: Hash of updated snapshot
@@ -62,14 +62,14 @@ class Comparison:
 
     def get_metric(self, name: str, tower: str | None = None) -> float:
         """Get a metric value.
-        
+
         Args:
             name: Metric name (e.g., 'nps', 'cka')
             tower: Optional tower name for per-tower metrics
-            
+
         Returns:
             Metric value
-            
+
         Raises:
             KeyError: If metric not found
         """

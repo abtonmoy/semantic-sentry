@@ -9,7 +9,7 @@ import torch
 
 class EncoderAdapter(ABC):
     """Abstract base class for encoder adapters.
-    
+
     An adapter wraps a model and provides a unified interface for encoding
     inputs into embeddings. Different adapters handle different model types
     (HuggingFace Transformers, CLIP, SentenceTransformers, etc.).
@@ -18,10 +18,10 @@ class EncoderAdapter(ABC):
     @abstractmethod
     def encode(self, inputs: Any) -> dict[str, torch.Tensor]:
         """Encode inputs into embeddings for all towers.
-        
+
         Args:
             inputs: Input data (format depends on model type)
-            
+
         Returns:
             Dict mapping tower name to normalized embedding tensor of shape (n, d)
         """
@@ -30,7 +30,7 @@ class EncoderAdapter(ABC):
     @abstractmethod
     def list_towers(self) -> list[str]:
         """Return ordered list of tower names.
-        
+
         Returns:
             List of tower names
         """
@@ -43,10 +43,10 @@ class EncoderAdapter(ABC):
 
     def encode_numpy(self, inputs: Any) -> dict[str, np.ndarray]:
         """Encode inputs and return as numpy arrays.
-        
+
         Args:
             inputs: Input data
-            
+
         Returns:
             Dict mapping tower name to normalized embedding array of shape (n, d)
         """
@@ -58,10 +58,10 @@ class EncoderAdapter(ABC):
 
     def _normalize(self, tensor: torch.Tensor) -> torch.Tensor:
         """L2 normalize embeddings.
-        
+
         Args:
             tensor: Embedding tensor of shape (n, d)
-            
+
         Returns:
             L2-normalized tensor
         """
@@ -86,7 +86,7 @@ class MultiTowerAdapter(EncoderAdapter):
 
     def __init__(self, tower_names: list[str]) -> None:
         """Initialize with tower names.
-        
+
         Args:
             tower_names: Ordered list of tower names
         """

@@ -3,11 +3,10 @@
 import numpy as np
 import pytest
 
-from semantic_sentry.core.monitor import DriftMonitor
-from semantic_sentry.core.classification import ConfidenceLevel
 from semantic_sentry.adapters.custom import CustomAdapter
-from semantic_sentry.probes.anchor_set import AnchorSet
+from semantic_sentry.core.monitor import DriftMonitor
 from semantic_sentry.exceptions import NoComparisonError
+from semantic_sentry.probes.anchor_set import AnchorSet
 
 
 @pytest.mark.stress
@@ -81,7 +80,9 @@ class TestClassificationStress:
         Z_drifted = Z_drifted / np.linalg.norm(Z_drifted, axis=1, keepdims=True)
 
         labels = np.array(["drifted"] * 50 + ["stable"] * 50)
-        anchor_set = AnchorSet(inputs=[f"s_{i}" for i in range(100)], labels=labels, modality="text")
+        anchor_set = AnchorSet(
+            inputs=[f"s_{i}" for i in range(100)], labels=labels, modality="text",
+        )
 
         adapter_v0 = CustomAdapter(
             encode_fn=lambda inputs: {"encoder": Z_base[:len(inputs)]},
@@ -121,7 +122,9 @@ class TestClassificationStress:
             encode_fn=lambda inputs: {"encoder": Z[:len(inputs)]},
             tower_names=["encoder"],
         )
-        anchor_set = AnchorSet(inputs=[f"s_{i}" for i in range(100)], labels=labels, modality="text")
+        anchor_set = AnchorSet(
+            inputs=[f"s_{i}" for i in range(100)], labels=labels, modality="text",
+        )
 
         monitor = DriftMonitor()
         snap = monitor.snapshot(model=None, anchor_set=anchor_set, adapter=adapter)
@@ -134,7 +137,9 @@ class TestClassificationStress:
             encode_fn=lambda inputs: {"encoder": batch_Z[:len(inputs)]},
             tower_names=["encoder"],
         )
-        results = monitor.classify_batch(batch_inputs, model=None, anchor_set=anchor_set, adapter=batch_adapter)
+        results = monitor.classify_batch(
+            batch_inputs, model=None, anchor_set=anchor_set, adapter=batch_adapter,
+        )
         assert len(results) == 10_000
 
     def test_clf_005_equidistant_centroids(self, rng):
@@ -151,7 +156,9 @@ class TestClassificationStress:
             encode_fn=lambda inputs: {"encoder": Z[:len(inputs)]},
             tower_names=["encoder"],
         )
-        anchor_set = AnchorSet(inputs=[f"s_{i}" for i in range(100)], labels=labels, modality="text")
+        anchor_set = AnchorSet(
+            inputs=[f"s_{i}" for i in range(100)], labels=labels, modality="text",
+        )
 
         monitor = DriftMonitor()
         snap = monitor.snapshot(model=None, anchor_set=anchor_set, adapter=adapter)

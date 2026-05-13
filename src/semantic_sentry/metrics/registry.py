@@ -23,7 +23,7 @@ class MetricEntry:
 
 class MetricRegistry:
     """Thread-safe singleton registry for drift metrics.
-    
+
     The registry maintains a collection of metrics that can be computed
     between pairs of embedding matrices. Built-in metrics are registered
     automatically, and custom metrics can be added with validation.
@@ -63,7 +63,7 @@ class MetricRegistry:
             }
             self._metrics = keep
             # Re-register any built-in that's missing or has been overwritten.
-            for name in self._BUILTIN_NAMES - set(self._metrics.keys()):
+            for _name in self._BUILTIN_NAMES - set(self._metrics.keys()):
                 self._register_builtins()
                 break
 
@@ -127,10 +127,10 @@ class MetricRegistry:
 
     def _validate_determinism(self, fn: Callable[[np.ndarray, np.ndarray], float]) -> None:
         """Validate that a metric function is deterministic.
-        
+
         Args:
             fn: Function to validate
-            
+
         Raises:
             MetricRegistrationError: If function is not deterministic
         """
@@ -143,7 +143,7 @@ class MetricRegistry:
             result1 = fn(Z0, Z1)
             result2 = fn(Z0, Z1)
         except Exception as e:
-            raise MetricRegistrationError(f"Metric function raised exception: {e}")
+            raise MetricRegistrationError(f"Metric function raised exception: {e}") from e
 
         # Check results are identical
         if result1 != result2:
@@ -159,15 +159,15 @@ class MetricRegistry:
 
     def compute(self, name: str, Z0: np.ndarray, Z1: np.ndarray) -> float:
         """Compute a single metric.
-        
+
         Args:
             name: Name of the metric
             Z0: First embedding matrix
             Z1: Second embedding matrix
-            
+
         Returns:
             Metric value
-            
+
         Raises:
             KeyError: If metric not found
         """
@@ -194,13 +194,13 @@ class MetricRegistry:
         parallel: bool = True
     ) -> dict[str, float]:
         """Compute all registered metrics in parallel.
-        
+
         Args:
             Z0: First embedding matrix
             Z1: Second embedding matrix
             metric_names: Optional list of specific metrics to compute
             parallel: Whether to use parallel execution
-            
+
         Returns:
             Dict mapping metric name to value
         """
@@ -223,7 +223,7 @@ class MetricRegistry:
 
     def list_metrics(self) -> list[str]:
         """List all registered metric names.
-        
+
         Returns:
             List of metric names
         """
@@ -232,13 +232,13 @@ class MetricRegistry:
 
     def get_info(self, name: str) -> MetricEntry:
         """Get information about a metric.
-        
+
         Args:
             name: Metric name
-            
+
         Returns:
             Metric entry
-            
+
         Raises:
             KeyError: If metric not found
         """
@@ -247,10 +247,10 @@ class MetricRegistry:
 
     def unregister(self, name: str) -> None:
         """Unregister a metric.
-        
+
         Args:
             name: Metric name to unregister
-            
+
         Raises:
             KeyError: If metric not found
         """
@@ -260,7 +260,7 @@ class MetricRegistry:
 
 def get_metric_registry() -> MetricRegistry:
     """Get the global metric registry instance.
-    
+
     Returns:
         MetricRegistry singleton
     """

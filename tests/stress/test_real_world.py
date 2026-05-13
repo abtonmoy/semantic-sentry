@@ -11,11 +11,12 @@ class TestRealWorld:
     @pytest.mark.timeout(120)
     def test_real_001_bert_base(self):
         """REAL-001: Load bert-base-uncased from HF Hub and capture snapshot."""
-        from transformers import AutoModel, AutoTokenizer
-        from semantic_sentry.core.monitor import DriftMonitor
-        from semantic_sentry.adapters.huggingface import HuggingFaceAdapter
-        from semantic_sentry.probes.anchor_set import AnchorSet
         import numpy as np
+        from transformers import AutoModel, AutoTokenizer
+
+        from semantic_sentry.adapters.huggingface import HuggingFaceAdapter
+        from semantic_sentry.core.monitor import DriftMonitor
+        from semantic_sentry.probes.anchor_set import AnchorSet
 
         model = AutoModel.from_pretrained("bert-base-uncased")
         tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
@@ -34,11 +35,12 @@ class TestRealWorld:
     @pytest.mark.timeout(180)
     def test_real_003_sentence_transformer(self):
         """REAL-003: SentenceTransformer all-MiniLM-L6-v2."""
-        from sentence_transformers import SentenceTransformer
-        from semantic_sentry.core.monitor import DriftMonitor
-        from semantic_sentry.adapters.sentence_transformer import SentenceTransformerAdapter
-        from semantic_sentry.probes.anchor_set import AnchorSet
         import numpy as np
+        from sentence_transformers import SentenceTransformer
+
+        from semantic_sentry.adapters.sentence_transformer import SentenceTransformerAdapter
+        from semantic_sentry.core.monitor import DriftMonitor
+        from semantic_sentry.probes.anchor_set import AnchorSet
 
         model = SentenceTransformer("all-MiniLM-L6-v2")
         anchor_texts = [f"Sentence {i} for embedding." for i in range(50)]
@@ -56,13 +58,13 @@ class TestRealWorld:
     @pytest.mark.timeout(300)
     def test_real_012_different_dims_raises(self):
         """REAL-012: Comparing base vs large (different dimensions) must raise EmbeddingDimError."""
+
+        import numpy as np
+
+        from semantic_sentry.adapters.custom import CustomAdapter
         from semantic_sentry.core.monitor import DriftMonitor
-        from semantic_sentry.core.snapshot import Snapshot
         from semantic_sentry.exceptions import EmbeddingDimError
         from semantic_sentry.probes.anchor_set import AnchorSet
-        from semantic_sentry.adapters.custom import CustomAdapter
-        import numpy as np
-        from datetime import datetime, timezone
 
         rng = np.random.default_rng(42)
         # "base" model: 768-dim embeddings

@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from semantic_sentry.metrics.cka import linear_cka
-from semantic_sentry.metrics.nps import nps
 from semantic_sentry.metrics.isotropy import isotropy
 from semantic_sentry.probes.anchor_set import AnchorSet
 

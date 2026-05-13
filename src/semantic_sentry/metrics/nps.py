@@ -13,26 +13,26 @@ except ImportError:
 
 def nps(Z0: np.ndarray, Z1: np.ndarray, k: int = 10) -> float:
     """Compute Neighborhood Preservation Score between two embedding spaces.
-    
+
     NPS measures how well the local neighborhood structure is preserved
     between two representations. For each point, it computes the overlap
     between its k-nearest neighbors in both spaces.
-    
+
     Algorithm:
         1. L2-normalize both matrices
         2. Build FAISS IndexFlatIP for both
         3. Search top-(k+1) neighbors (exclude self)
         4. Compute per-point overlap fraction
         5. Return mean overlap
-    
+
     Args:
         Z0: First embedding matrix of shape (n, d0)
         Z1: Second embedding matrix of shape (n, d1)
         k: Number of neighbors to consider (default: 10)
-        
+
     Returns:
         NPS score in [0, 1], where 1 means perfect neighborhood preservation
-        
+
     Raises:
         ValueError: If input matrices have different numbers of samples
     """
@@ -105,10 +105,10 @@ def nps_per_point(Z0: np.ndarray, Z1: np.ndarray, k: int = 10) -> np.ndarray:
 
 def _l2_normalize(X: np.ndarray) -> np.ndarray:
     """L2 normalize rows of matrix.
-    
+
     Args:
         X: Matrix of shape (n, d)
-        
+
     Returns:
         L2-normalized matrix
     """
@@ -187,10 +187,10 @@ def _drop_self_column(raw: np.ndarray, k: int) -> np.ndarray:
 
 def nps_bounds(nps_score: float) -> tuple[float, float]:
     """Return theoretical bounds on downstream task degradation.
-    
+
     Args:
         nps_score: The NPS score
-        
+
     Returns:
         Tuple of (lower_bound, upper_bound) on degradation
     """

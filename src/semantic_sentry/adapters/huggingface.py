@@ -5,7 +5,7 @@ from typing import Any
 import torch
 
 try:
-    from transformers import PreTrainedModel, PreTrainedTokenizer
+    from transformers import PreTrainedModel, PreTrainedTokenizer  # noqa: F401
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
@@ -15,13 +15,13 @@ from semantic_sentry.adapters.base import SingleTowerAdapter
 
 class HuggingFaceAdapter(SingleTowerAdapter):
     """Adapter for HuggingFace Transformers models.
-    
+
     This adapter handles encoder-only models like BERT, RoBERTa, E5, etc.
     It extracts the [CLS] token representation or mean pools if specified.
-    
+
     Example:
         from transformers import AutoModel, AutoTokenizer
-        
+
         model = AutoModel.from_pretrained("bert-base-uncased")
         tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
         adapter = HuggingFaceAdapter(model, tokenizer)
@@ -35,7 +35,7 @@ class HuggingFaceAdapter(SingleTowerAdapter):
         normalize: bool = True
     ):
         """Initialize HuggingFace adapter.
-        
+
         Args:
             model: HuggingFace model instance
             tokenizer: HuggingFace tokenizer instance
@@ -56,10 +56,10 @@ class HuggingFaceAdapter(SingleTowerAdapter):
 
     def encode(self, inputs: Any) -> dict[str, torch.Tensor]:
         """Encode text inputs into embeddings.
-        
+
         Args:
             inputs: Text inputs (str, list[str], or pre-tokenized dict)
-            
+
         Returns:
             Dict with single tower 'encoder' containing embeddings
         """

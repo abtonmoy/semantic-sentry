@@ -9,7 +9,7 @@ from typing import Any
 @dataclass(frozen=True)
 class AnchorSet:
     """Immutable anchor set for drift detection probes.
-    
+
     Attributes:
         inputs: The input data (text, images, etc.) for the anchor set
         labels: Optional labels for the anchor points

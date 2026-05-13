@@ -9,9 +9,9 @@ import numpy as np
 
 from semantic_sentry.adapters import detect_adapter
 from semantic_sentry.adapters.base import EncoderAdapter
+from semantic_sentry.core.classification import ClassificationResult, ConfidenceLevel
 from semantic_sentry.core.comparison import Comparison
 from semantic_sentry.core.snapshot import Snapshot
-from semantic_sentry.core.classification import ClassificationResult, ConfidenceLevel
 from semantic_sentry.exceptions import (
     AdapterDetectionError,
     AnchorSetMismatchError,
@@ -42,11 +42,11 @@ class ClassificationContext:
 
 class DriftMonitor:
     """Main orchestrator for semantic drift detection.
-    
+
     The DriftMonitor captures snapshots of model embeddings and compares
     them to detect drift over time. It supports both single-tower and
     multi-tower models.
-    
+
     Example:
         monitor = DriftMonitor()
         snapshot_v0 = monitor.snapshot(model_v0, anchor_set)
@@ -73,15 +73,15 @@ class DriftMonitor:
         adapter: EncoderAdapter | None = None
     ) -> Snapshot:
         """Capture a snapshot of model embeddings.
-        
+
         Args:
             model: Model to snapshot (any supported model type)
             anchor_set: Anchor set to use for encoding
             adapter: Optional adapter (auto-detected if not provided)
-            
+
         Returns:
             Frozen Snapshot of the model state
-            
+
         Raises:
             AdapterDetectionError: If adapter cannot be auto-detected
             TowerMismatchError: If model and adapter tower counts disagree
@@ -142,15 +142,15 @@ class DriftMonitor:
         per_tower: bool = True
     ) -> Comparison:
         """Compare two snapshots and compute drift metrics.
-        
+
         Args:
             snapshot_v0: Base snapshot
             snapshot_v1: Updated snapshot
             per_tower: Whether to compute per-tower metrics for multi-tower models
-            
+
         Returns:
             Comparison result with drift metrics
-            
+
         Raises:
             AnchorSetMismatchError: If snapshots use different anchor sets
             TowerMismatchError: If snapshots have different tower counts/names
@@ -186,8 +186,12 @@ class DriftMonitor:
                 )
 
         # Compute global metrics (concatenate all towers)
-        Z0_global = np.concatenate([snapshot_v0.get_tower(name) for name in snapshot_v0.tower_names], axis=1)
-        Z1_global = np.concatenate([snapshot_v1.get_tower(name) for name in snapshot_v1.tower_names], axis=1)
+        Z0_global = np.concatenate(
+            [snapshot_v0.get_tower(name) for name in snapshot_v0.tower_names], axis=1
+        )
+        Z1_global = np.concatenate(
+            [snapshot_v1.get_tower(name) for name in snapshot_v1.tower_names], axis=1
+        )
 
         global_metrics = self._metric_registry.compute_all(Z0_global, Z1_global)
 
@@ -251,10 +255,10 @@ class DriftMonitor:
         embeddings: dict[str, np.ndarray]
     ) -> dict[tuple[str, str], float]:
         """Compute mean pairwise cosine similarity between towers.
-        
+
         Args:
             embeddings: Dict mapping tower name to embeddings
-            
+
         Returns:
             Dict mapping (tower1, tower2) to mean cosine similarity
         """

@@ -1,12 +1,12 @@
 """Phase 5.2: Transfer function stress tests."""
 
+
 import numpy as np
 import pytest
-from datetime import datetime, timezone
 
+from semantic_sentry.core.comparison import Comparison
 from semantic_sentry.transfer.function import LinearTransfer
 from semantic_sentry.transfer.nps_bound import NPSBound
-from semantic_sentry.core.comparison import Comparison, AlertSeverity
 
 
 @pytest.mark.stress
@@ -30,7 +30,11 @@ class TestTransferStress:
         for i in range(n):
             c = Comparison(
                 snapshot_v0_hash="base", snapshot_v1_hash=f"upd_{i}",
-                global_metrics={"cka": cka_vals[i], "nps": nps_vals[i], "isotropy_delta": iso_vals[i]},
+                global_metrics={
+                    "cka": cka_vals[i],
+                    "nps": nps_vals[i],
+                    "isotropy_delta": iso_vals[i],
+                },
                 per_tower_metrics=None, alignment_deltas=None,
             )
             comparisons.append(c)

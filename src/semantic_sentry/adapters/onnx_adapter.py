@@ -5,7 +5,7 @@ from typing import Any
 import torch
 
 try:
-    import onnxruntime as ort
+    import onnxruntime as ort  # noqa: F401 — re-imported lazily where needed
     ONNX_AVAILABLE = True
 except ImportError:
     ONNX_AVAILABLE = False
@@ -15,13 +15,13 @@ from semantic_sentry.adapters.base import EncoderAdapter
 
 class ONNXAdapter(EncoderAdapter):
     """Adapter for ONNX Runtime inference sessions.
-    
+
     This adapter handles ONNX models for efficient inference.
     Supports both CPU and GPU execution providers.
-    
+
     Example:
         import onnxruntime as ort
-        
+
         session = ort.InferenceSession("model.onnx")
         adapter = ONNXAdapter(session, input_name="input", output_name="output")
     """
@@ -34,7 +34,7 @@ class ONNXAdapter(EncoderAdapter):
         normalize: bool = True
     ):
         """Initialize ONNX adapter.
-        
+
         Args:
             session: ONNX Runtime InferenceSession
             input_name: Name of the input node
@@ -58,10 +58,10 @@ class ONNXAdapter(EncoderAdapter):
 
     def encode(self, inputs: Any) -> dict[str, torch.Tensor]:
         """Encode inputs using ONNX Runtime.
-        
+
         Args:
             inputs: Input tensor or numpy array
-            
+
         Returns:
             Dict mapping output name to embedding tensor
         """
@@ -78,7 +78,7 @@ class ONNXAdapter(EncoderAdapter):
 
         # Convert to tensors and normalize
         result = {}
-        for name, output in zip(self._output_names, outputs):
+        for name, output in zip(self._output_names, outputs, strict=False):
             tensor = torch.from_numpy(output)
             if self._normalize:
                 tensor = torch.nn.functional.normalize(tensor, p=2, dim=1)

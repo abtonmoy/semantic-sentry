@@ -11,16 +11,16 @@ from semantic_sentry.adapters.base import EncoderAdapter
 
 class CustomAdapter(EncoderAdapter):
     """Adapter for custom encode functions.
-    
+
     This adapter allows users to provide their own encode function
     for models not supported by built-in adapters.
-    
+
     Example:
         def my_encode(inputs):
             # Custom encoding logic
             embeddings = my_model.encode(inputs)
             return {"encoder": torch.tensor(embeddings)}
-        
+
         adapter = CustomAdapter(encode_fn=my_encode, tower_count=1)
     """
 
@@ -32,7 +32,7 @@ class CustomAdapter(EncoderAdapter):
         normalize: bool = True
     ):
         """Initialize custom adapter.
-        
+
         Args:
             encode_fn: Function that takes inputs and returns embeddings
             tower_count: Number of towers

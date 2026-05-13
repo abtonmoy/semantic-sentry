@@ -35,7 +35,7 @@ class CalibrationProfile:
 
     def to_transfer_function(self) -> LinearTransfer:
         """Convert profile to fitted LinearTransfer.
-        
+
         Returns:
             Fitted LinearTransfer instance
         """
@@ -48,7 +48,7 @@ class CalibrationProfile:
 
     def save(self, path: str | Path) -> None:
         """Save calibration profile to JSON.
-        
+
         Args:
             path: File path to save to
         """
@@ -71,10 +71,10 @@ class CalibrationProfile:
     @classmethod
     def load(cls, path: str | Path) -> "CalibrationProfile":
         """Load calibration profile from JSON.
-        
+
         Args:
             path: File path to load from
-            
+
         Returns:
             Loaded CalibrationProfile
         """
@@ -102,13 +102,13 @@ class CalibrationProfile:
         n_samples: int
     ) -> "CalibrationProfile":
         """Create profile from fitted transfer function.
-        
+
         Args:
             transfer: Fitted LinearTransfer
             profile_name: Name for the profile
             model_family: Model family identifier
             n_samples: Number of calibration samples
-            
+
         Returns:
             CalibrationProfile
         """
@@ -130,7 +130,7 @@ class CalibrationProfileStore:
 
     def __init__(self, storage_dir: str | Path = "~/.semantic_sentry/calibration"):
         """Initialize profile store.
-        
+
         Args:
             storage_dir: Directory to store profiles
         """
@@ -140,7 +140,7 @@ class CalibrationProfileStore:
 
     def save(self, profile: CalibrationProfile) -> None:
         """Save a profile to storage.
-        
+
         Args:
             profile: Profile to save
         """
@@ -150,13 +150,13 @@ class CalibrationProfileStore:
 
     def load(self, profile_name: str) -> CalibrationProfile:
         """Load a profile from storage.
-        
+
         Args:
             profile_name: Name of the profile
-            
+
         Returns:
             Loaded profile
-            
+
         Raises:
             FileNotFoundError: If profile not found
         """
@@ -175,7 +175,7 @@ class CalibrationProfileStore:
 
     def list_profiles(self) -> list[str]:
         """List available profiles.
-        
+
         Returns:
             List of profile names
         """
@@ -183,7 +183,7 @@ class CalibrationProfileStore:
 
     def delete(self, profile_name: str) -> None:
         """Delete a profile.
-        
+
         Args:
             profile_name: Name of profile to delete
         """

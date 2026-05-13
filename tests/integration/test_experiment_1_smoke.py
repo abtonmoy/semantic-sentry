@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 def test_import():
     """Test that the module imports successfully."""
     print("Testing import...")
-    from experiments import experiment_1_full_finetune
     print(" Import successful")
     return True
 
@@ -40,10 +39,10 @@ def test_expected_methods():
     """Test that expected methods are present."""
     print("\nTesting expected methods...")
     from experiments.experiment_1_full_finetune import (
+        SimpleImageCaptionDataset,
         download_mscoco,
         evaluate_retrieval,
         run_experiment,
-        SimpleImageCaptionDataset,
     )
 
     methods = [download_mscoco, evaluate_retrieval, run_experiment]

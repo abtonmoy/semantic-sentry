@@ -11,10 +11,8 @@ import numpy as np
 import pytest
 
 from semantic_sentry.core.snapshot import Snapshot
-from semantic_sentry.exceptions import SnapshotCorruptionError
 from semantic_sentry.metrics.nps import _get_knn_indices, _l2_normalize, nps
 from semantic_sentry.metrics.registry import MetricRegistry
-
 
 # ---------------------------------------------------------------------------
 # Item 6 — cross-tower alignment keys with `__` in tower names round-trip
@@ -135,7 +133,8 @@ def test_classify_local_nps_uses_precomputed_per_anchor_nps():
     v1_encodings = v0_encodings + 0.1 * rng.standard_normal((32, 16)).astype(np.float32)
 
     class _StaticEncoder:
-        def __init__(self, table): self.table = {t: e for t, e in zip(anchor_inputs, table)}
+        def __init__(self, table):
+            self.table = {t: e for t, e in zip(anchor_inputs, table, strict=False)}
         def encode(self, texts):
             return np.stack([self.table.get(t, np.zeros(16, dtype=np.float32))
                               for t in texts])

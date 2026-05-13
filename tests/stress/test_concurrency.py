@@ -1,5 +1,6 @@
 """Phase 3: Concurrency and thread safety tests."""
 
+import contextlib
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -73,13 +74,12 @@ class TestConcurrency:
 
         def register_loop():
             for i in range(50):
-                try:
+                # may fail if name exists — that's the race we're stressing
+                with contextlib.suppress(Exception):
                     registry.register(
                         name=f"dyn_{i}",
                         fn=lambda Z0, Z1, _i=i: float(_i),
                     )
-                except Exception:
-                    pass  # may fail if name exists
 
         t1 = threading.Thread(target=compute_loop)
         t2 = threading.Thread(target=register_loop)
