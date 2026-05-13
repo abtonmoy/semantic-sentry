@@ -27,8 +27,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from scipy.spatial.distance import jensenshannon
-from scipy.stats import kendalltau
+from scipy.spatial.distance import jensenshannon  # type: ignore[import-untyped]
+from scipy.stats import kendalltau  # type: ignore[import-untyped]
 
 from semantic_sentry.exceptions import MetricRegistrationError
 from semantic_sentry.metrics.nps import _l2_normalize
@@ -196,7 +196,7 @@ def get_behavioral_registry() -> BehavioralMetricRegistry:
 
 def _scores(Z_Q: np.ndarray, D: np.ndarray) -> np.ndarray:
     """Cosine similarity matrix of shape (|Q|, |D|). Assumes L2-normalized."""
-    return Z_Q @ D.T
+    return np.asarray(Z_Q @ D.T)
 
 
 def score_distribution_jsd(

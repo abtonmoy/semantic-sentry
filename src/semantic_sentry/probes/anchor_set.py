@@ -32,7 +32,7 @@ class AnchorSet:
             composite version_hash is stable across reruns with the same seed.
     """
     inputs: Any
-    labels: tuple = field(default_factory=tuple)
+    labels: tuple[Any, ...] = field(default_factory=tuple)
     modality: str = "text"
     version_hash: str = field(default="", repr=False)
     n_samples: int = field(default=0)
@@ -102,15 +102,25 @@ class AnchorSet:
         q_labels = _index_labels(self.labels, q_idx)
         d_labels = _index_labels(self.labels, d_idx)
 
-        common = dict(
-            modality=self.modality,
-            distribution_tag=self.distribution_tag,
-            parent_hash=self.version_hash,
-            partition_seed=seed,
-        )
         return (
-            AnchorSet(inputs=q_inputs, labels=q_labels, role="Q", **common),
-            AnchorSet(inputs=d_inputs, labels=d_labels, role="D", **common),
+            AnchorSet(
+                inputs=q_inputs,
+                labels=q_labels,
+                modality=self.modality,
+                distribution_tag=self.distribution_tag,
+                parent_hash=self.version_hash,
+                role="Q",
+                partition_seed=seed,
+            ),
+            AnchorSet(
+                inputs=d_inputs,
+                labels=d_labels,
+                modality=self.modality,
+                distribution_tag=self.distribution_tag,
+                parent_hash=self.version_hash,
+                role="D",
+                partition_seed=seed,
+            ),
         )
 
     @staticmethod
@@ -150,7 +160,7 @@ def _index_inputs(inputs: Any, idx: np.ndarray) -> Any:
     return [inputs[int(i)] for i in idx]
 
 
-def _index_labels(labels: tuple, idx: np.ndarray) -> tuple:
+def _index_labels(labels: tuple[Any, ...], idx: np.ndarray) -> tuple[Any, ...]:
     if not labels:
         return ()
     seq = list(labels) if not hasattr(labels, '__getitem__') else labels

@@ -21,7 +21,7 @@ G4 register_with_temporal: convenience wiring — register one pairwise metric
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -32,10 +32,14 @@ if TYPE_CHECKING:
 
     from semantic_sentry.core.snapshot import Snapshot
 
-_TEMPORAL: dict[str, Callable] = {}
+# Temporal metrics take `(snapshots, times) -> np.ndarray` — the broad
+# Callable signature is intentional; downstream callers narrow as needed.
+TemporalFn = "Callable[[list[Snapshot], list[float]], np.ndarray]"
+
+_TEMPORAL: dict[str, Callable[..., np.ndarray]] = {}
 
 
-def register_temporal(name: str, fn: Callable) -> None:
+def register_temporal(name: str, fn: Callable[..., np.ndarray]) -> None:
     """Register a temporal (sequence-level) metric.
 
     Args:
@@ -50,7 +54,7 @@ def list_temporal() -> list[str]:
     return list(_TEMPORAL.keys())
 
 
-def get_temporal(name: str) -> Callable:
+def get_temporal(name: str) -> Callable[..., np.ndarray]:
     return _TEMPORAL[name]
 
 
@@ -179,7 +183,7 @@ def plateau(
     T = len(candidate)
     out = np.zeros(T, dtype=bool)
     if k <= 1:
-        return candidate
+        return np.asarray(candidate, dtype=bool)
     # Rolling AND: an index i is in plateau if all candidate[i-k+1:i+1] are True.
     for i in range(k - 1, T):
         if candidate[i - k + 1 : i + 1].all():
@@ -189,10 +193,10 @@ def plateau(
 
 def register_with_temporal(
     name: str,
-    fn: Callable,
+    fn: Callable[..., float],
     range: tuple[float, float] | None = None,
     description: str | None = None,
-    params: dict | None = None,
+    params: dict[str, Any] | None = None,
     registry: MetricRegistry | None = None,
 ) -> None:
     """G4 — register a pairwise metric and auto-wire its velocity/acceleration
