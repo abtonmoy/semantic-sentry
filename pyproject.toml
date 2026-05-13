@@ -15,8 +15,6 @@ dependencies = [
     "safetensors>=0.4.0",
     "transformers>=4.35.0",
     "tqdm>=4.65.0",
-    "beir>=2.2.0",
-    "mteb>=2.12.23",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +23,10 @@ sentence-transformers = ["sentence-transformers>=2.2.0"]
 onnx = ["onnxruntime>=1.16.0"]
 wandb = ["wandb>=0.16.0"]
 mlflow = ["mlflow>=2.8.0"]
+# Benchmark suites — BEIR for retrieval, MTEB for cross-task probing.
+# Moved out of required deps because they pull in hundreds of MB and only
+# matter when running the paper experiments (see ../experiments/).
+bench = ["beir>=2.2.0", "mteb>=2.12.23"]
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
@@ -33,7 +35,7 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.7.0",
 ]
-all = ["semantic-sentry[clip,sentence-transformers,onnx,wandb,mlflow,dev]"]
+all = ["semantic-sentry[clip,sentence-transformers,onnx,wandb,mlflow,bench,dev]"]
 
 [build-system]
 requires = ["hatchling"]

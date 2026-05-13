@@ -36,15 +36,15 @@ def main():
         "Attention mechanisms have revolutionized NLP",
         "Embeddings capture semantic meaning in vector space",
         "Fine-tuning adapts pre-trained models to specific tasks",
-    ] * 10  # 100 samples
+    ] * 10 # 100 samples
     
     anchor_set = AnchorSet(
         inputs=anchor_texts,
         labels=tuple([f"topic_{i % 5}" for i in range(len(anchor_texts))]),
         modality="text"
     )
-    print(f"   Created anchor set with {anchor_set.n_samples} samples")
-    print(f"   Version hash: {anchor_set.version_hash}")
+    print(f" Created anchor set with {anchor_set.n_samples} samples")
+    print(f" Version hash: {anchor_set.version_hash}")
     
     # 2. Create models
     print("\n2. Creating encoder models...")
@@ -57,8 +57,8 @@ def main():
         for param in model_v1.parameters():
             param.add_(torch.randn_like(param) * 0.1)
     
-    print("   Created model v0 (base)")
-    print("   Created model v1 (drifted)")
+    print(" Created model v0 (base)")
+    print(" Created model v1 (drifted)")
     
     # 3. Create adapter
     print("\n3. Creating custom adapter...")
@@ -77,7 +77,7 @@ def main():
         return emb
     
     adapter = CustomAdapter(encode_fn=encode_fn, tower_count=1)
-    print("   Adapter created")
+    print(" Adapter created")
     
     # 4. Capture snapshots
     print("\n4. Capturing snapshots...")
@@ -85,7 +85,7 @@ def main():
     
     # Snapshot v0
     snapshot_v0 = monitor.snapshot(model_v0, anchor_set, adapter=adapter)
-    print(f"   Captured snapshot v0: {snapshot_v0.checkpoint_hash[:8]}")
+    print(f" Captured snapshot v0: {snapshot_v0.checkpoint_hash[:8]}")
     
     # Snapshot v1 (with drifted model)
     def encode_fn_v1(texts):
@@ -102,27 +102,27 @@ def main():
     
     adapter_v1 = CustomAdapter(encode_fn=encode_fn_v1, tower_count=1)
     snapshot_v1 = monitor.snapshot(model_v1, anchor_set, adapter=adapter_v1)
-    print(f"   Captured snapshot v1: {snapshot_v1.checkpoint_hash[:8]}")
+    print(f" Captured snapshot v1: {snapshot_v1.checkpoint_hash[:8]}")
     
     # 5. Compare snapshots
     print("\n5. Comparing snapshots...")
     comparison = monitor.compare(snapshot_v0, snapshot_v1)
     
-    print(f"\n   Drift Severity: {comparison.severity.value.upper()}")
-    print(f"   Global Metrics:")
+    print(f"\n Drift Severity: {comparison.severity.value.upper()}")
+    print(f" Global Metrics:")
     for metric_name, value in comparison.global_metrics.items():
-        print(f"     {metric_name}: {value:.4f}")
+        print(f" {metric_name}: {value:.4f}")
     
     # 6. Interpret results
     print("\n6. Interpretation:")
     if comparison.severity.value == "low":
-        print("   ✓ Minimal drift detected. Model is stable.")
+        print(" Minimal drift detected. Model is stable.")
     elif comparison.severity.value == "medium":
-        print("   ⚠ Moderate drift detected. Monitor closely.")
+        print(" Moderate drift detected. Monitor closely.")
     elif comparison.severity.value == "high":
-        print("   ⚠ Significant drift detected. Consider re-evaluation.")
+        print(" Significant drift detected. Consider re-evaluation.")
     else:
-        print("   ✗ Critical drift! Model may need retraining.")
+        print(" Critical drift! Model may need retraining.")
     
     # 7. Save and load
     print("\n7. Serialization test...")
@@ -132,12 +132,12 @@ def main():
     with tempfile.TemporaryDirectory() as tmpdir:
         save_path = Path(tmpdir) / "snapshot"
         snapshot_v0.save(save_path)
-        print(f"   Saved snapshot to {save_path}")
+        print(f" Saved snapshot to {save_path}")
         
         from semantic_sentry import Snapshot
         loaded = Snapshot.load(save_path)
-        print(f"   Loaded snapshot: {loaded.checkpoint_hash[:8]}")
-        print(f"   Match: {loaded.checkpoint_hash == snapshot_v0.checkpoint_hash}")
+        print(f" Loaded snapshot: {loaded.checkpoint_hash[:8]}")
+        print(f" Match: {loaded.checkpoint_hash == snapshot_v0.checkpoint_hash}")
     
     print("\n" + "=" * 60)
     print("Quickstart complete!")

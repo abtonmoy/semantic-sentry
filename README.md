@@ -1,24 +1,53 @@
 # SemanticSentry
 
-Universal semantic drift detection for any embedding space.
+Universal semantic drift detection for embedding spaces.
 
-[![PyPI version](https://badge.fury.io/py/semantic-sentry.svg)](https://badge.fury.io/py/semantic-sentry)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ## Overview
 
-SemanticSentry detects and quantifies semantic drift in continuously updated embedding models. It monitors how model updates (fine-tuning, quantization, LoRA, etc.) geometrically transform embedding spaces and predicts downstream performance degradation—without requiring labeled evaluation data.
+SemanticSentry is a small library for capturing snapshots of an embedding
+space and computing standard geometric-drift metrics — linear CKA, NPS,
+isotropy Δ — between snapshots. It is the metric-and-snapshot core that
+the matched-magnitude dissociation paper (companion `../paper/` and
+`../experiments/`) is built on.
 
-### Key Features
+### What the metrics do — and what they don't
 
-- 🎯 **Universal**: Works with any embedding model (BERT, CLIP, sentence transformers, custom models)
-- 📊 **Multi-metric**: CKA (global), NPS (local), Isotropy (spectral)
-- 🔮 **Predictive**: Transfer functions predict downstream degradation
-- 🏗️ **Multi-tower**: Supports dual-encoder and multi-modal models
-- 🚀 **Efficient**: FAISS-accelerated neighborhood search
-- 📝 **MLOps ready**: Weights & Biases, MLflow integrations
+Geometric drift metrics tell you **whether the embedding space moved**.
+They do **not** tell you whether the downstream task will degrade,
+improve, or stay the same. The companion paper establishes empirically
+that on E5-base-v2 a contrastive LoRA at CKA 0.88 / NPS 0.60 preserves
+MS MARCO retrieval, while MLM LoRA at CKA 0.81 / NPS 0.48 — barely more
+geometric drift — destroys it. The relationship between drift magnitude
+and downstream impact depends on the *direction* of drift relative to
+the evaluation task. See `../experiments/figures/fig1_dissociation_5way.png`
+for the 5-way visual summary and `../paper/sections/04-dissociation.tex`
+Table 1 for the underlying numbers.
 
-## Quick Start
+The metrics in this library are therefore useful as **change detectors**
+(did something move?) and as **dissociation diagnostics** (is the
+geometric drift consistent with the downstream impact, or is the
+downstream impact larger / smaller than the drift would predict?) — not
+as a one-number health score.
+
+### Key features
+
+- **Universal**: Works with any embedding model (BERT, CLIP,
+  sentence-transformers, custom models).
+- **Metrics**: Linear CKA (Kornblith et al. 2019), NPS at k-NN with
+  FAISS, Isotropy Δ from singular-value spectra. All anchor-parameterised
+  and unit-tested.
+- **Snapshot/compare API**: Freeze an embedding-state, diff two
+  snapshots, get per-metric numbers + severity heuristics.
+- **Multi-tower**: Supports dual-encoder and multi-modal models.
+- **Efficient**: FAISS-accelerated neighborhood search; metrics run
+  in seconds on 1 000-passage anchors with 768-d embeddings.
+- **Integrations** *(scaffolded)*: stubs for Weights & Biases, MLflow,
+  and webhook hooks under `src/semantic_sentry/integrations/` — wire-up
+  to the metric pipeline is in progress, see `plan/improvement.md`.
+
+## Quick start
 
 ### Installation
 
@@ -27,89 +56,151 @@ SemanticSentry detects and quantifies semantic drift in continuously updated emb
 pip install semantic-sentry
 
 # With optional dependencies
-pip install semantic-sentry[clip]           # CLIP support
-pip install semantic-sentry[sentence-transformers]  # SentenceTransformers
-pip install semantic-sentry[onnx]           # ONNX support
-pip install semantic-sentry[all]            # Everything
+pip install semantic-sentry[clip] # CLIP support
+pip install semantic-sentry[sentence-transformers] # SentenceTransformers
+pip install semantic-sentry[onnx] # ONNX support
+pip install semantic-sentry[all] # Everything
 ```
 
-### Basic Usage
+For development, clone and install editable:
+
+```bash
+git clone https://github.com/abtonmoy/semantic-sentry
+cd semantic-sentry
+pip install -e ".[dev]"
+pytest tests/unit/ -q # 120 tests pass
+```
+
+### Basic usage
 
 ```python
 from semantic_sentry import DriftMonitor, AnchorSet
 from semantic_sentry.adapters.custom import CustomAdapter
-import torch
 
-# Create anchor set
+# Fixed anchor set the metrics will be computed against
 anchor_set = AnchorSet(
     inputs=["example text 1", "example text 2", ...],
     labels=("label_1", "label_2", ...),
 )
 
-# Create adapter for your model
+# Adapter wraps your model's encode function
 adapter = CustomAdapter(encode_fn=model.encode, tower_count=1)
 
-# Capture snapshots
+# Snapshot before + after
 monitor = DriftMonitor()
 snapshot_v0 = monitor.snapshot(model_v0, anchor_set, adapter=adapter)
 snapshot_v1 = monitor.snapshot(model_v1, anchor_set, adapter=adapter)
 
-# Compare and detect drift
+# Diff
 comparison = monitor.compare(snapshot_v0, snapshot_v1)
-print(f"Drift severity: {comparison.severity}")
 print(f"CKA: {comparison.global_metrics['cka']:.4f}")
 print(f"NPS: {comparison.global_metrics['nps']:.4f}")
+print(f"Heuristic severity: {comparison.severity}") # interpret with the caveat above
 ```
+
+You can also call the metric functions directly on numpy arrays:
+
+```python
+from semantic_sentry.metrics.cka import linear_cka
+from semantic_sentry.metrics.nps import nps
+import numpy as np
+
+Z_base = base_model.encode(anchor_texts) # shape (n, d_base)
+Z_new = new_model.encode(anchor_texts) # shape (n, d_new), n must match
+cka_score = linear_cka(Z_base, Z_new)
+nps_score = nps(Z_base, Z_new, k=10)
+```
+
+Both `linear_cka` and `nps` are rotation- and permutation-invariant
+(verified in `tests/unit/test_cka.py` and `tests/unit/test_nps.py`).
 
 ## Architecture
 
 SemanticSentry follows a 5-layer architecture:
 
-1. **Encoder Layer**: Model-specific adapters (HuggingFace, CLIP, SentenceTransformers, ONNX, Custom)
-2. **Snapshot Layer**: Frozen capture of embedding states
-3. **Metrics Layer**: CKA, NPS, Isotropy with registry pattern
-4. **Transfer Layer**: Linear transfer functions, calibration profiles
-5. **Integration Layer**: W&B, MLflow, webhooks
+1. **Encoder layer** — model-specific adapters (HuggingFace, CLIP,
+   SentenceTransformers, ONNX, Custom).
+2. **Snapshot layer** — frozen capture of embedding states + the anchor
+   set they were computed against.
+3. **Metrics layer** — CKA / NPS / isotropy Δ with a registry pattern
+   for plugging in additional metrics.
+4. **Transfer layer** — linear transfer functions and calibration
+   profiles (used by the paper's downstream-prediction work).
+5. **Integration layer** — W&B, MLflow, webhook adapters.
 
-## Supported Metrics
+Source layout:
 
-| Metric | Description | Range | Property |
-|--------|-------------|-------|----------|
-| CKA | Centered Kernel Alignment | [0, 1] | Global structural similarity |
-| NPS | Neighborhood Preservation Score | [0, 1] | Local neighborhood retention |
-| Isotropy Δ | Spectral geometry change | [-1, 1] | Anisotropy shift |
+```
+src/semantic_sentry/
+├── adapters/ huggingface / clip / sentence_transformers / onnx / custom
+├── core/ anchor sets, snapshots, monitor, comparison
+├── metrics/ cka.py (Kornblith linear), nps.py (FAISS k-NN), isotropy.py
+├── probes/ classification / retrieval probes
+├── evaluation/ downstream-metric harnesses
+├── transfer/ linear transfer fitting + calibration
+├── integrations/ wandb, mlflow, webhooks
+└── exceptions.py
+```
 
-## Alert Severity Levels
+## Metrics
 
-| Severity | CKA | NPS | Action |
-|----------|-----|-----|--------|
-| Low | > 0.98 | > 0.95 | ✓ Stable |
-| Medium | 0.90-0.98 | 0.85-0.95 | ⚠ Monitor |
-| High | 0.80-0.90 | 0.70-0.85 | ⚠ Evaluate |
-| Critical | < 0.80 | < 0.70 | ✗ Retrain |
+| Metric | Implementation | Range | Property |
+|---|---|---|---|
+| Linear CKA | `metrics/cka.py` — centered-Gram HSIC form (Kornblith 2019) | [0, 1] | Global structural similarity. Rotation- and permutation-invariant. |
+| NPS @ k | `metrics/nps.py` — FAISS `IndexFlatIP` on L2-normalised embeddings | [0, 1] | Mean per-point overlap of top-k neighbours between two snapshots. |
+| Isotropy Δ | `metrics/isotropy.py` — singular-value spectrum gap | [-1, 1] | Change in spectral anisotropy. |
+
+All three metrics are pure functions of `(Z_base, Z_new, [k])` and treat
+the anchor as opaque, so the same code computes metrics against any
+anchor set without modification.
+
+## Heuristic severity buckets
+
+Severity bands below are **heuristic** — useful for triage, not for
+performance prediction. The matched-magnitude paper (see `../paper/`)
+shows these thresholds are not reliable predictors of downstream
+impact; e.g. a "High" CKA band (0.80–0.90) can correspond to either
+preserved retrieval (contrastive LoRA) or 13 pp damage (MLM LoRA).
+
+| Severity | CKA | NPS | Triage action |
+|---|---|---|---|
+| Low | > 0.98 | > 0.95 | Likely stable; verify with one downstream eval |
+| Medium | 0.90–0.98 | 0.85–0.95 | Monitor; investigate if downstream eval is task-critical |
+| High | 0.80–0.90 | 0.70–0.85 | Run downstream evals; do not assume preservation |
+| Critical | < 0.80 | < 0.70 | Re-evaluate and likely retrain |
+
+For a more principled diagnostic, see the matched-magnitude protocol in
+`../experiments/figures/fig1_dissociation_5way.png` and §3 of the
+companion paper.
 
 ## Examples
 
-See `examples/` directory:
+See `examples/`:
 
-- `quickstart.py`: Minimal usage example
-- `text_encoder_monitoring.py`: BERT/E5-style monitoring
-- `clip_drift_detection.py`: Vision-language model monitoring
+- `quickstart.py` — minimal usage example
+- `text_encoder_monitoring.py` — BERT / E5-style monitoring
+
+## Reproducing the matched-magnitude paper
+
+The companion `../experiments/` directory holds every training run,
+evaluation, and figure in the paper. See `../experiments/README.md` for
+the full directory map and reproduction commands. Key scripts that use
+this library:
+
+- `../experiments/e5/e5_lora_finetune.py` — contrastive LoRA trainer that
+  calls `compute_drift_metrics()` (NPS + CKA + isotropy Δ) at every
+  checkpoint.
+- `../experiments/methodology/anchor_robustness/anchor_robustness.py` —
+  computes NPS + CKA for every Table 1 condition under three different
+  anchor sets (recompute only, no retraining).
 
 ## Development
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/semantic-sentry
-cd semantic-sentry
+# Run the unit tests (120 tests — including invariance checks for CKA / NPS)
+pytest tests/unit/ -q
 
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest tests/unit/ -v
-
-# Run with coverage
+# With coverage
 pytest tests/ --cov=semantic_sentry --cov-report=html
 ```
 
@@ -119,16 +210,16 @@ pytest tests/ --cov=semantic_sentry --cov-report=html
 @software{semantic_sentry,
   title = {SemanticSentry: Universal Semantic Drift Detection},
   author = {Abdul Basit Tonmoy},
-  year = {2025},
-  url = {https://github.com/yourusername/semantic-sentry}
+  year = {2026},
+  url = {https://github.com/abtonmoy/semantic-sentry}
 }
 ```
 
 ## License
 
-Apache 2.0 - See [LICENSE](LICENSE) for details.
+Apache 2.0 — see [LICENSE](LICENSE) for details.
 
 ## Contributing
 
-Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-# semantic-sentry
+Contributions welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md)
+for guidelines.

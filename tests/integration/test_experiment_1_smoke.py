@@ -13,7 +13,7 @@ def test_import():
     """Test that the module imports successfully."""
     print("Testing import...")
     from experiments import experiment_1_full_finetune
-    print("✓ Import successful")
+    print(" Import successful")
     return True
 
 
@@ -28,10 +28,10 @@ def test_cli_help():
         cwd=Path(__file__).parent.parent,
     )
     if result.returncode == 0 and "Full Fine-Tuning" in result.stdout:
-        print("✓ CLI help works")
+        print(" CLI help works")
         return True
     else:
-        print("✗ CLI help failed")
+        print(" CLI help failed")
         print(result.stderr)
         return False
 
@@ -53,7 +53,7 @@ def test_expected_methods():
     assert hasattr(SimpleImageCaptionDataset, "__len__")
     assert hasattr(SimpleImageCaptionDataset, "__getitem__")
 
-    print("✓ All expected methods present")
+    print(" All expected methods present")
     return True
 
 
@@ -81,7 +81,7 @@ def test_per_tower_metrics_structure():
     for metric in expected_metrics:
         assert metric in checkpoint["drift_metrics"], f"Missing metric: {metric}"
 
-    print("✓ Per-tower metrics structure correct")
+    print(" Per-tower metrics structure correct")
     return True
 
 
@@ -108,7 +108,7 @@ def main():
             else:
                 failed += 1
         except Exception as e:
-            print(f"✗ {test.__name__} failed with exception: {e}")
+            print(f" {test.__name__} failed with exception: {e}")
             failed += 1
 
     print("\n" + "=" * 60)

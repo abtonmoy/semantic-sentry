@@ -1,5 +1,6 @@
 """Transfer function for predicting downstream task degradation."""
 
+import warnings
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -7,35 +8,50 @@ import numpy as np
 from semantic_sentry.core.comparison import Comparison
 
 
+# Feature order used by every concrete TransferFunction in this module.
+# Kept as a module-level constant so the wider repo can ship a single
+# feature_names list with calibration profiles.
+TRANSFER_FEATURE_NAMES = ("1-cka", "1-nps", "|isotropy_delta|")
+
+
+def extract_drift_features(comparison: Comparison) -> np.ndarray:
+    """Vectorise a Comparison into the standard 3-feature drift vector.
+
+    Features (in the order declared by `TRANSFER_FEATURE_NAMES`):
+        - 1 - CKA (global structural change)
+        - 1 - NPS (local neighbourhood change)
+        - |isotropy_delta| (spectral geometry change)
+
+    Defaults of 1.0 / 1.0 / 0.0 (= no drift) are used when a metric is
+    missing from `comparison.global_metrics`.
+    """
+    cka = comparison.global_metrics.get("cka", 1.0)
+    nps = comparison.global_metrics.get("nps", 1.0)
+    iso_delta = comparison.global_metrics.get("isotropy_delta", 0.0)
+    return np.array([1.0 - cka, 1.0 - nps, abs(iso_delta)])
+
+
 class TransferFunction(ABC):
     """Abstract base class for transfer functions.
-    
+
     Transfer functions map drift metrics to predicted downstream task
     degradation. This allows drift detection to be actionable without
-    requiring labeled evaluation data.
+    requiring labelled evaluation data.
     """
 
     @abstractmethod
     def fit(self, comparisons: list[Comparison], degradations: list[float]) -> None:
-        """Fit the transfer function to calibration data.
-        
-        Args:
-            comparisons: List of comparison results
-            degradations: List of measured downstream degradations
-        """
-        pass
+        """Fit the transfer function to calibration data."""
 
     @abstractmethod
     def predict(self, comparison: Comparison) -> float:
-        """Predict downstream degradation for a comparison.
-        
-        Args:
-            comparison: Comparison result to predict from
-            
-        Returns:
-            Predicted degradation (0.0 = no degradation, 1.0 = complete failure)
-        """
-        pass
+        """Predict downstream degradation for a comparison."""
+
+    # Concrete classes share this helper rather than duplicating the
+    # feature-vector code (was duplicated in LinearTransfer and
+    # LogisticTransfer prior to this refactor).
+    def _extract_features(self, comparison: Comparison) -> np.ndarray:
+        return extract_drift_features(comparison)
 
 
 class LinearTransfer(TransferFunction):
@@ -79,15 +95,13 @@ class LinearTransfer(TransferFunction):
         X = np.array([self._extract_features(c) for c in comparisons])
         y = np.array(degradations)
 
-        # Fit OLS: y = X @ w + b
-        # Add bias term
+        # Fit OLS: y = X @ w + b, with an explicit bias column.
+        n_features = X.shape[1]
         X_aug = np.column_stack([X, np.ones(len(X))])
+        solution, _residuals, _rank, _s = np.linalg.lstsq(X_aug, y, rcond=None)
 
-        # Solve using least squares
-        solution, residuals, rank, s = np.linalg.lstsq(X_aug, y, rcond=None)
-
-        self.weights = solution[:3]
-        self.bias = solution[3]
+        self.weights = solution[:n_features]
+        self.bias = float(solution[n_features])
         self._fitted = True
 
         # Compute R-squared
@@ -120,46 +134,23 @@ class LinearTransfer(TransferFunction):
         # Clamp to [0, 1]
         return float(np.clip(prediction, 0.0, 1.0))
 
-    def _extract_features(self, comparison: Comparison) -> np.ndarray:
-        """Extract features from comparison.
-        
-        Features:
-            - 1 - CKA (global structural change)
-            - 1 - NPS (local neighborhood change)
-            - |isotropy_delta| (spectral geometry change)
-        
-        Args:
-            comparison: Comparison result
-            
-        Returns:
-            Feature vector
-        """
-        cka = comparison.global_metrics.get("cka", 1.0)
-        nps = comparison.global_metrics.get("nps", 1.0)
-        iso_delta = comparison.global_metrics.get("isotropy_delta", 0.0)
-
-        return np.array([
-            1.0 - cka,
-            1.0 - nps,
-            abs(iso_delta)
-        ])
+    # _extract_features is inherited from TransferFunction.
 
     def get_feature_importance(self) -> dict[str, float]:
         """Get feature importance (absolute weights).
-        
+
         Returns:
             Dict mapping feature name to importance
-        
+
         Raises:
             ValueError: If not fitted
         """
         if not self._fitted:
             raise ValueError("Not fitted")
 
-        feature_names = ["1-cka", "1-nps", "|isotropy_delta|"]
         return {
             name: float(abs(weight))
-            for name, weight in zip(feature_names, self.weights)
+            for name, weight in zip(TRANSFER_FEATURE_NAMES, self.weights)
         }
 
 
@@ -193,51 +184,73 @@ class LogisticTransfer(TransferFunction):
         if len(comparisons) < 3:
             raise ValueError("Need at least 3 samples")
 
-        # Extract features
-        X = np.array([
-            [
-                1.0 - c.global_metrics.get("cka", 1.0),
-                1.0 - c.global_metrics.get("nps", 1.0),
-                abs(c.global_metrics.get("isotropy_delta", 0.0))
-            ]
-            for c in comparisons
-        ])
+        X = np.array([self._extract_features(c) for c in comparisons])
 
-        # Binary targets
-        y = np.array([1.0 if d > self.degradation_threshold else 0.0 for d in degradations])
+        # Binary targets: 1 if measured degradation exceeded the threshold.
+        y = np.array([1.0 if d > self.degradation_threshold else 0.0
+                      for d in degradations])
 
-        # Fit using least squares approximation (simplified)
-        X_aug = np.column_stack([X, np.ones(len(X))])
-        solution, _, _, _ = np.linalg.lstsq(X_aug, y, rcond=None)
+        # Maximum-likelihood logistic regression via scipy.optimize. Prior
+        # to v0.2.0 this method ran OLS on binary labels and applied a
+        # sigmoid only at predict() — that was OLS-on-binary, not actual
+        # logistic regression. Switching to true MLE.
+        from scipy.optimize import minimize
 
-        self.weights = solution[:3]
-        self.bias = solution[3]
+        n_features = X.shape[1]
+        # Parameter vector: [w_1, ..., w_d, bias]
+        def _neg_log_likelihood(params: np.ndarray) -> float:
+            w = params[:n_features]
+            b = params[n_features]
+            z = X @ w + b
+            # log(1 + exp(z)) computed stably via logaddexp(0, z).
+            log_one_plus_exp = np.logaddexp(0.0, z)
+            nll = -np.sum(y * z - log_one_plus_exp)
+            return float(nll)
+
+        def _grad(params: np.ndarray) -> np.ndarray:
+            w = params[:n_features]
+            b = params[n_features]
+            z = X @ w + b
+            p = 1.0 / (1.0 + np.exp(-z))
+            err = p - y                                  # shape (n,)
+            grad_w = X.T @ err                           # shape (d,)
+            grad_b = err.sum()
+            return np.concatenate([grad_w, [grad_b]])
+
+        x0 = np.zeros(n_features + 1)
+        result = minimize(_neg_log_likelihood, x0, jac=_grad, method="L-BFGS-B")
+        if not result.success:
+            # Fall back to the OLS-on-binary form rather than failing hard;
+            # warn so the caller knows the fit was not MLE.
+            warnings.warn(
+                f"LogisticTransfer MLE fit did not converge: {result.message}. "
+                "Falling back to OLS-on-binary (legacy v0.1.0 behaviour).",
+                stacklevel=2,
+            )
+            X_aug = np.column_stack([X, np.ones(len(X))])
+            solution, _, _, _ = np.linalg.lstsq(X_aug, y, rcond=None)
+            self.weights = solution[:n_features]
+            self.bias = float(solution[n_features])
+        else:
+            self.weights = result.x[:n_features]
+            self.bias = float(result.x[n_features])
         self._fitted = True
 
     def predict(self, comparison: Comparison) -> float:
         """Predict probability of significant degradation.
-        
+
         Args:
             comparison: Comparison result
-            
+
         Returns:
             Probability of degradation
         """
         if not self._fitted:
             raise ValueError("Not fitted")
 
-        cka = comparison.global_metrics.get("cka", 1.0)
-        nps = comparison.global_metrics.get("nps", 1.0)
-        iso_delta = comparison.global_metrics.get("isotropy_delta", 0.0)
-
-        features = np.array([1.0 - cka, 1.0 - nps, abs(iso_delta)])
-
-        # Linear prediction
+        features = self._extract_features(comparison)
         linear_pred = self.weights @ features + self.bias
-
-        # Apply sigmoid
         prob = 1.0 / (1.0 + np.exp(-linear_pred))
-
         return float(prob)
 
 

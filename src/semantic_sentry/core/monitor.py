@@ -1,6 +1,8 @@
 """DriftMonitor orchestrator for drift detection."""
 
 import hashlib
+import warnings
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -20,6 +22,22 @@ from semantic_sentry.exceptions import (
 from semantic_sentry.metrics.nps import nps_per_point
 from semantic_sentry.metrics.registry import get_metric_registry
 from semantic_sentry.probes.anchor_set import AnchorSet
+
+
+@dataclass(frozen=True)
+class ClassificationContext:
+    """Frozen bundle of everything `classify*()` needs from a comparison.
+
+    Returned from `DriftMonitor.make_classification_context()` and accepted
+    by the new `classify(*, context=..., ...)` / `classify_batch(*,
+    context=..., ...)` keyword-only signature. Removes the dependence on
+    `DriftMonitor._last_*` mutable state that the v0.1.0 audit flagged
+    (improvement.md item 1) and lets a single monitor be reused across
+    interleaved compare() / classify() calls.
+    """
+    comparison: Comparison
+    v1_embeddings: dict[str, np.ndarray] = field(default_factory=dict)
+    per_anchor_nps: dict[str, np.ndarray] = field(default_factory=dict)
 
 
 class DriftMonitor:
@@ -43,6 +61,10 @@ class DriftMonitor:
         self._last_anchor_set: AnchorSet | None = None
         self._last_v0_embeddings: dict[str, np.ndarray] | None = None
         self._last_v1_embeddings: dict[str, np.ndarray] | None = None
+        # Per-anchor NPS, computed once at compare() time and reused by every
+        # subsequent classify() call. Eliminates the O(n²)-per-input cost
+        # that the v0.1.0 audit flagged (improvement.md item 2).
+        self._last_anchor_per_point_nps: dict[str, np.ndarray] | None = None
 
     def snapshot(
         self,
@@ -199,8 +221,23 @@ class DriftMonitor:
 
         # Store for later use
         self._last_comparison = comparison
-        self._last_v0_embeddings = {name: snapshot_v0.get_tower(name).copy() for name in snapshot_v0.tower_names}
-        self._last_v1_embeddings = {name: snapshot_v1.get_tower(name).copy() for name in snapshot_v1.tower_names}
+        self._last_v0_embeddings = {name: snapshot_v0.get_tower(name).copy()
+                                     for name in snapshot_v0.tower_names}
+        self._last_v1_embeddings = {name: snapshot_v1.get_tower(name).copy()
+                                     for name in snapshot_v1.tower_names}
+        # Precompute per-anchor NPS (v0 vs v1) once per tower; classify()
+        # later looks up the input's nearest anchors and averages their
+        # per-anchor NPS values to get a local-drift estimate.
+        per_point: dict[str, np.ndarray] = {}
+        anchor_n = next(iter(self._last_v0_embeddings.values())).shape[0]
+        if anchor_n >= 12:  # need >= k+1 with default k=10
+            for name in snapshot_v0.tower_names:
+                per_point[name] = nps_per_point(
+                    self._last_v0_embeddings[name],
+                    self._last_v1_embeddings[name],
+                    k=10,
+                )
+        self._last_anchor_per_point_nps = per_point or None
 
         return comparison
 
@@ -243,34 +280,45 @@ class DriftMonitor:
 
     def _compute_checkpoint_hash(self, model: Any) -> str:
         """Compute hash of model weights.
-        
+
         Args:
             model: Model to hash
-            
+
         Returns:
-            Hash string
+            16-hex-char SHA-256 prefix.
         """
         # Try to get state dict
         if hasattr(model, 'state_dict'):
             state_dict = model.state_dict()
+            h = hashlib.sha256()
+            for key in sorted(state_dict.keys()):
+                h.update(key.encode())
+                h.update(state_dict[key].detach().cpu().numpy().tobytes())
+            return h.hexdigest()[:16]
         elif hasattr(model, 'parameters'):
-            # Fallback: hash parameter values
             params = list(model.parameters())
             h = hashlib.sha256()
             for p in params:
                 h.update(p.detach().cpu().numpy().tobytes())
             return h.hexdigest()[:16]
         else:
-            # Cannot hash, use type name
-            return hashlib.sha256(type(model).__name__.encode()).hexdigest()[:16]
-
-        # Hash sorted state dict
-        h = hashlib.sha256()
-        for key in sorted(state_dict.keys()):
-            h.update(key.encode())
-            h.update(state_dict[key].detach().cpu().numpy().tobytes())
-
-        return h.hexdigest()[:16]
+            # Cannot inspect weights. Hashing just `type(model).__name__`
+            # would collide every model of the same class — clearly wrong
+            # for a checkpoint hash. Add `id(model)` so different instances
+            # do not collide, and warn so the caller knows the hash is
+            # process-scoped.
+            import warnings
+            warnings.warn(
+                f"DriftMonitor: model of type {type(model).__name__!r} has no "
+                "state_dict() or parameters(); falling back to a process-"
+                "scoped identity hash. Two different runs will not see the "
+                "same checkpoint_hash for this model.",
+                stacklevel=3,
+            )
+            h = hashlib.sha256()
+            h.update(type(model).__name__.encode())
+            h.update(str(id(model)).encode())
+            return h.hexdigest()[:16]
 
     def _get_model_id(self, model: Any) -> str:
         """Get a model identifier.
@@ -288,13 +336,32 @@ class DriftMonitor:
         else:
             return "unknown_model"
 
+    def make_classification_context(self) -> ClassificationContext:
+        """Bundle the data needed by `classify*()` into an explicit context.
+
+        Call after `compare()` to obtain a stateless context object you can
+        pass to `classify(*, context=...)` / `classify_batch(*, context=...)`.
+        Preferred over the implicit-state form (which is now deprecated).
+        """
+        if (self._last_comparison is None
+                or self._last_v1_embeddings is None):
+            raise NoComparisonError("Must call compare() before make_classification_context()")
+        return ClassificationContext(
+            comparison=self._last_comparison,
+            v1_embeddings={k: v.copy() for k, v in self._last_v1_embeddings.items()},
+            per_anchor_nps={k: v.copy()
+                             for k, v in (self._last_anchor_per_point_nps or {}).items()},
+        )
+
     def classify(
         self,
         input_data: list,
         model: Any,
         anchor_set: AnchorSet,
         adapter: EncoderAdapter | None = None,
-        k: int = 10
+        k: int = 10,
+        *,
+        context: ClassificationContext | None = None,
     ) -> ClassificationResult:
         """Classify input data with drift-aware confidence.
 
@@ -304,6 +371,10 @@ class DriftMonitor:
             anchor_set: Anchor set with known labels
             adapter: Optional adapter (auto-detected if not provided)
             k: Number of nearest neighbors to consider
+            context: Optional `ClassificationContext` (preferred). When
+                provided, the call is fully stateless and does not read from
+                `DriftMonitor` instance state. When `None`, the monitor falls
+                back to its `_last_*` state with a `DeprecationWarning`.
 
         Returns:
             Classification result with confidence level
@@ -311,8 +382,22 @@ class DriftMonitor:
         Raises:
             NoComparisonError: If no comparison has been run yet
         """
-        if self._last_comparison is None:
-            raise NoComparisonError("Must call compare() before classify()")
+        if context is None:
+            if self._last_comparison is None:
+                raise NoComparisonError("Must call compare() before classify()")
+            warnings.warn(
+                "DriftMonitor.classify() without an explicit `context=` kwarg "
+                "reads mutable instance state from the most recent compare() "
+                "call. Prefer `monitor.classify(..., context="
+                "monitor.make_classification_context())`. The implicit-state "
+                "form will be removed in v0.3.0.",
+                DeprecationWarning, stacklevel=2,
+            )
+            ctx_v1_embeddings = self._last_v1_embeddings or {}
+            ctx_per_anchor = self._last_anchor_per_point_nps or {}
+        else:
+            ctx_v1_embeddings = context.v1_embeddings
+            ctx_per_anchor = context.per_anchor_nps
 
         # Auto-detect adapter if not provided
         if adapter is None:
@@ -324,22 +409,24 @@ class DriftMonitor:
         Z_input = input_embeddings[tower_name]
 
         # Get anchor embeddings from v1 (the "new" model)
-        Z_anchor = self._last_v1_embeddings[tower_name]
+        Z_anchor = ctx_v1_embeddings[tower_name]
 
-        # Compute per-point NPS for local drift detection
-        nps_scores = nps_per_point(
-            np.vstack([Z_anchor, Z_input]),
-            np.vstack([Z_anchor, Z_input]),
-            k=min(k, Z_anchor.shape[0] + Z_input.shape[0] - 1)
-        )
-
-        # Get local NPS for the input point (last one)
-        local_nps = float(nps_scores[-1])
-
-        # Find k nearest anchor points
-        similarities = Z_input[0] @ Z_anchor.T  # Cosine similarity (already normalized)
+        # Find k nearest anchor points to the input under v1.
+        similarities = Z_input[0] @ Z_anchor.T  # cosine sim (anchors already normalised)
         nearest_indices = np.argsort(-similarities)[:k]
-        nearest_distances = 1 - similarities[nearest_indices]  # Convert to distance
+        nearest_distances = 1 - similarities[nearest_indices]
+
+        # Local drift estimate: average per-anchor NPS over the input's
+        # k nearest anchors. Per-anchor NPS was precomputed once at compare()
+        # time, so this is O(k) per input (vs the previous O(n_anchor²) per
+        # input, which also returned a trivially-1.0 value because
+        # `nps_per_point(M, M)` is identically 1).
+        per_anchor_nps = ctx_per_anchor.get(tower_name)
+        if per_anchor_nps is None:
+            # Anchor set too small for kNN — treat as no-drift signal.
+            local_nps = 1.0
+        else:
+            local_nps = float(np.mean(per_anchor_nps[nearest_indices]))
 
         # Get labels of nearest anchors
         nearest_labels = [anchor_set.labels[int(i)] for i in nearest_indices]
@@ -377,7 +464,9 @@ class DriftMonitor:
         model: Any,
         anchor_set: AnchorSet,
         adapter: EncoderAdapter | None = None,
-        k: int = 10
+        k: int = 10,
+        *,
+        context: ClassificationContext | None = None,
     ) -> list[ClassificationResult]:
         """Classify a batch of inputs with drift-aware confidence.
 
@@ -387,6 +476,9 @@ class DriftMonitor:
             anchor_set: Anchor set with known labels
             adapter: Optional adapter (auto-detected if not provided)
             k: Number of nearest neighbors to consider
+            context: Optional `ClassificationContext` (preferred). When
+                `None`, falls back to monitor state with a
+                `DeprecationWarning`.
 
         Returns:
             List of classification results
@@ -394,8 +486,23 @@ class DriftMonitor:
         Raises:
             NoComparisonError: If no comparison has been run yet
         """
-        if self._last_comparison is None:
-            raise NoComparisonError("Must call compare() before classify_batch()")
+        if context is None:
+            if self._last_comparison is None:
+                raise NoComparisonError("Must call compare() before classify_batch()")
+            warnings.warn(
+                "DriftMonitor.classify_batch() without an explicit `context=` "
+                "kwarg reads mutable instance state from the most recent "
+                "compare() call. Prefer "
+                "`monitor.classify_batch(..., context="
+                "monitor.make_classification_context())`. The implicit-state "
+                "form will be removed in v0.3.0.",
+                DeprecationWarning, stacklevel=2,
+            )
+            ctx_v1_embeddings = self._last_v1_embeddings or {}
+            ctx_per_anchor = self._last_anchor_per_point_nps or {}
+        else:
+            ctx_v1_embeddings = context.v1_embeddings
+            ctx_per_anchor = context.per_anchor_nps
 
         # Auto-detect adapter if not provided
         if adapter is None:
@@ -407,28 +514,36 @@ class DriftMonitor:
         Z_inputs = input_embeddings[tower_name]
 
         # Get anchor embeddings from v1
-        Z_anchor = self._last_v1_embeddings[tower_name]
+        Z_anchor = ctx_v1_embeddings[tower_name]
 
         # Compute similarities for all inputs at once
         similarities = Z_inputs @ Z_anchor.T  # (n_inputs, n_anchors)
+        # Top-k anchor indices per input in one vectorised step.
+        topk_idx = np.argpartition(-similarities, kth=min(k, similarities.shape[1] - 1),
+                                    axis=1)[:, :k]
+        # Resort within the slice so they're in similarity order.
+        for i in range(topk_idx.shape[0]):
+            sims_i = similarities[i, topk_idx[i]]
+            order = np.argsort(-sims_i)
+            topk_idx[i] = topk_idx[i, order]
+
+        per_anchor_nps = ctx_per_anchor.get(tower_name)
 
         results = []
-        for i, sims in enumerate(similarities):
-            nearest_indices = np.argsort(-sims)[:k]
-            nearest_distances = 1 - sims[nearest_indices]
+        for i in range(len(Z_inputs)):
+            nearest_indices = topk_idx[i]
+            nearest_distances = 1 - similarities[i, nearest_indices]
 
-            # Get labels of nearest anchors
             nearest_labels = [anchor_set.labels[int(idx)] for idx in nearest_indices]
-
-            # Majority vote
             from collections import Counter
-            label_counts = Counter(nearest_labels)
-            predicted_label = label_counts.most_common(1)[0][0]
+            predicted_label = Counter(nearest_labels).most_common(1)[0][0]
 
-            # Compute local NPS for this point
-            Z_combined = np.vstack([Z_anchor, Z_inputs[i:i+1]])
-            nps_scores = nps_per_point(Z_combined, Z_combined, k=min(k, Z_combined.shape[0] - 1))
-            local_nps = float(nps_scores[-1])
+            # Local NPS = average per-anchor NPS over the input's k nearest
+            # anchors. Per-anchor NPS was precomputed at compare() time.
+            if per_anchor_nps is None:
+                local_nps = 1.0
+            else:
+                local_nps = float(np.mean(per_anchor_nps[nearest_indices]))
 
             # Determine confidence
             if local_nps > 0.90:

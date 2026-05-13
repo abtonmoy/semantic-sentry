@@ -1,20 +1,20 @@
 """Calibration profile storage for transfer functions."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
-from semantic_sentry.transfer.function import LinearTransfer
+from semantic_sentry.transfer.function import TRANSFER_FEATURE_NAMES, LinearTransfer
 
 
 @dataclass
 class CalibrationProfile:
     """Calibration profile for a model family.
-    
+
     Stores fitted transfer function parameters and metadata for reuse.
-    
+
     Attributes:
         profile_name: Name of the calibration profile
         model_family: Model family identifier (e.g., "bert-base", "clip-vit")
@@ -22,7 +22,8 @@ class CalibrationProfile:
         bias: Transfer function bias
         r_squared: Model fit quality
         n_samples: Number of calibration samples
-        feature_names: Names of features used
+        feature_names: Names of features used (defaults to the standard
+            (1-cka, 1-nps, |isotropy_delta|) trio).
     """
     profile_name: str
     model_family: str
@@ -30,12 +31,7 @@ class CalibrationProfile:
     bias: float
     r_squared: float
     n_samples: int
-    feature_names: list[str] = None
-
-    def __post_init__(self):
-        """Set default feature names."""
-        if self.feature_names is None:
-            self.feature_names = ["1-cka", "1-nps", "|isotropy_delta|"]
+    feature_names: list[str] = field(default_factory=lambda: list(TRANSFER_FEATURE_NAMES))
 
     def to_transfer_function(self) -> LinearTransfer:
         """Convert profile to fitted LinearTransfer.

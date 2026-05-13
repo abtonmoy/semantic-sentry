@@ -54,7 +54,7 @@ class TestActualCheckpoints:
             "supervised learning",
             "unsupervised learning",
             "transfer learning",
-        ] * 10  # 100 samples
+        ] * 10 # 100 samples
         
         anchor_set = AnchorSet(
             inputs=anchor_texts,
@@ -121,9 +121,9 @@ class TestActualCheckpoints:
             assert 0.0 <= comparison.global_metrics["nps"] <= 1.0
             
             print(f"\nDrift between similar models:")
-            print(f"  CKA: {comparison.global_metrics['cka']:.4f}")
-            print(f"  NPS: {comparison.global_metrics['nps']:.4f}")
-            print(f"  Severity: {comparison.severity.value}")
+            print(f" CKA: {comparison.global_metrics['cka']:.4f}")
+            print(f" NPS: {comparison.global_metrics['nps']:.4f}")
+            print(f" Severity: {comparison.severity.value}")
     
     def test_drifted_checkpoint_shows_high_drift(self):
         """A drifted model should show higher drift severity."""
@@ -188,10 +188,10 @@ class TestActualCheckpoints:
         assert comparison.severity in [AlertSeverity.MEDIUM, AlertSeverity.HIGH, AlertSeverity.CRITICAL]
         
         print(f"\nDrift between drifted models:")
-        print(f"  CKA: {comparison.global_metrics['cka']:.4f}")
-        print(f"  NPS: {comparison.global_metrics['nps']:.4f}")
-        print(f"  Isotropy Δ: {comparison.global_metrics.get('isotropy_delta', 0):.4f}")
-        print(f"  Severity: {comparison.severity.value}")
+        print(f" CKA: {comparison.global_metrics['cka']:.4f}")
+        print(f" NPS: {comparison.global_metrics['nps']:.4f}")
+        print(f" Isotropy Δ: {comparison.global_metrics.get('isotropy_delta', 0):.4f}")
+        print(f" Severity: {comparison.severity.value}")
     
     def test_checkpoint_save_load_roundtrip(self):
         """Test that snapshots can be saved and loaded after checkpoint comparison."""
@@ -237,7 +237,7 @@ class TestActualCheckpoints:
             assert (Path(tmpdir) / "v0").exists()
             assert (Path(tmpdir) / "v1").exists()
             print(f"\nCheckpoint roundtrip test: PASSED")
-            print(f"  Loaded CKA: {comparison.global_metrics['cka']:.4f}")
+            print(f" Loaded CKA: {comparison.global_metrics['cka']:.4f}")
     
     def test_quantized_checkpoint_drift(self):
         """Test drift detection between full-precision and simulated quantized model."""
@@ -274,9 +274,9 @@ class TestActualCheckpoints:
         comparison = monitor.compare(snapshot_fp32, snapshot_quant)
         
         print(f"\nQuantization drift:")
-        print(f"  CKA: {comparison.global_metrics['cka']:.4f}")
-        print(f"  NPS: {comparison.global_metrics['nps']:.4f}")
-        print(f"  Severity: {comparison.severity.value}")
+        print(f" CKA: {comparison.global_metrics['cka']:.4f}")
+        print(f" NPS: {comparison.global_metrics['nps']:.4f}")
+        print(f" Severity: {comparison.severity.value}")
         
         # Quantization can show significant drift (especially with simulated int8)
         # Just verify drift is detected (CKA < 1.0)
@@ -291,4 +291,4 @@ if __name__ == "__main__":
     test.test_drifted_checkpoint_shows_high_drift()
     test.test_checkpoint_save_load_roundtrip()
     test.test_quantized_checkpoint_drift()
-    print("\n✓ All checkpoint tests passed!")
+    print("\n All checkpoint tests passed!")

@@ -27,34 +27,43 @@ except ImportError:
 
 def detect_adapter(model) -> EncoderAdapter:
     """Auto-detect the appropriate adapter for a model.
-    
+
     Priority order:
-    1. CLIPAdapter (has encode_image + encode_text)
-    2. SentenceTransformerAdapter (isinstance check)
-    3. ONNXAdapter (isinstance InferenceSession)
-    4. HuggingFaceAdapter (isinstance PreTrainedModel)
-    5. Raise AdapterDetectionError
-    
+    1. SentenceTransformerAdapter (isinstance check)
+    2. ONNXAdapter (isinstance InferenceSession)
+
+    Adapter types that require extra constructor args (CLIP needs a
+    tokenizer + preprocess; HuggingFace `PreTrainedModel` needs a
+    tokenizer) cannot be returned from auto-detection — pass them to
+    ``CLIPAdapter`` / ``HuggingFaceAdapter`` directly. We log a debug
+    message when one of those types is detected so the user knows why
+    auto-detection didn't match, but we don't raise on that case;
+    auto-detection raises only when no adapter at all matches.
+
     Args:
         model: Model instance to detect adapter for
-        
+
     Returns:
-        Appropriate EncoderAdapter instance
-        
+        Appropriate EncoderAdapter instance.
+
     Raises:
-        AdapterDetectionError: If no adapter matches the model type
+        AdapterDetectionError: If no adapter at all matches the model type.
     """
+    import logging
     from semantic_sentry.exceptions import AdapterDetectionError
 
-    # Check for CLIP (OpenCLIP)
+    log = logging.getLogger(__name__)
+
+    # CLIP — needs tokenizer + preprocess; cannot be auto-constructed.
     if CLIPAdapter is not None:
         if hasattr(model, 'encode_image') and hasattr(model, 'encode_text'):
-            raise AdapterDetectionError(
-                "CLIP model detected but requires tokenizer and preprocess. "
-                "Use CLIPAdapter directly with: CLIPAdapter(model, tokenizer, preprocess)"
+            log.debug(
+                "detect_adapter: model looks like a CLIP model but CLIPAdapter "
+                "needs a tokenizer + preprocess; skipping auto-detection. "
+                "Use CLIPAdapter(model, tokenizer, preprocess) directly."
             )
 
-    # Check for SentenceTransformer
+    # SentenceTransformer — fully constructible from the model alone.
     if SentenceTransformerAdapter is not None:
         try:
             from sentence_transformers import SentenceTransformer
@@ -63,7 +72,7 @@ def detect_adapter(model) -> EncoderAdapter:
         except ImportError:
             pass
 
-    # Check for ONNX
+    # ONNX — fully constructible from the model alone.
     if ONNXAdapter is not None:
         try:
             import onnxruntime as ort
@@ -72,24 +81,28 @@ def detect_adapter(model) -> EncoderAdapter:
         except ImportError:
             pass
 
-    # Check for HuggingFace
+    # HuggingFace — needs a tokenizer; cannot be auto-constructed.
     if HuggingFaceAdapter is not None:
         try:
             from transformers import PreTrainedModel
             if isinstance(model, PreTrainedModel):
-                raise AdapterDetectionError(
-                    "HuggingFace model detected but requires tokenizer. "
-                    "Use HuggingFaceAdapter directly with: HuggingFaceAdapter(model, tokenizer)"
+                log.debug(
+                    "detect_adapter: model looks like a HuggingFace "
+                    "PreTrainedModel but HuggingFaceAdapter needs a tokenizer; "
+                    "skipping auto-detection. Use "
+                    "HuggingFaceAdapter(model, tokenizer) directly."
                 )
         except ImportError:
             pass
 
-    # No adapter found
+    # No adapter matched.
     model_type = type(model).__name__
     raise AdapterDetectionError(
         f"No adapter found for model type '{model_type}'. "
         f"Available adapters: CustomAdapter. "
-        f"Consider using CustomAdapter with a custom encode function."
+        f"Consider using CustomAdapter with a custom encode function, "
+        f"or pass CLIPAdapter / HuggingFaceAdapter explicitly if your "
+        f"model needs a tokenizer / preprocess."
     )
 
 

@@ -40,10 +40,32 @@ class MetricRegistry:
                     cls._instance._initialize()
         return cls._instance
 
+    # Names of metrics installed by `_register_builtins`. Used by `reset()`
+    # to distinguish "tests added a custom metric" from "always-present".
+    _BUILTIN_NAMES = frozenset({"cka", "nps", "isotropy_delta"})
+
     def _initialize(self) -> None:
         """Initialize the registry with empty storage."""
         self._metrics: dict[str, MetricEntry] = {}
         self._register_builtins()
+
+    def reset(self) -> None:
+        """Drop every metric except the built-ins.
+
+        Useful between tests so that a metric registered in test A does not
+        leak into test B. Built-ins (`cka`, `nps`, `isotropy_delta`) are
+        re-registered if they were overwritten.
+        """
+        with self._lock:
+            keep = {
+                name: entry for name, entry in self._metrics.items()
+                if name in self._BUILTIN_NAMES
+            }
+            self._metrics = keep
+            # Re-register any built-in that's missing or has been overwritten.
+            for name in self._BUILTIN_NAMES - set(self._metrics.keys()):
+                self._register_builtins()
+                break
 
     def _register_builtins(self) -> None:
         """Register built-in metrics (called during initialization, no lock needed)."""

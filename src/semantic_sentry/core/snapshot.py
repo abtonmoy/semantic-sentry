@@ -3,7 +3,7 @@
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -13,10 +13,10 @@ from safetensors.numpy import save_file
 from semantic_sentry.exceptions import SnapshotCorruptionError
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Snapshot:
     """Frozen snapshot of model embedding state.
-    
+
     Attributes:
         model_id: Identifier for the model
         checkpoint_hash: Hash of model weights for integrity
@@ -30,13 +30,21 @@ class Snapshot:
     """
     model_id: str
     checkpoint_hash: str
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     anchor_set_version: str = ""
     tower_count: int = 1
-    tower_names: tuple = field(default_factory=lambda: ("encoder",))
-    embeddings: dict = field(default_factory=dict)
+    tower_names: tuple[str, ...] = field(default_factory=lambda: ("encoder",))
+    embeddings: dict[str, np.ndarray] = field(default_factory=dict)
     cross_tower_alignment: dict | None = None
     metadata: dict = field(default_factory=dict)
+
+    def __hash__(self) -> int:
+        # `frozen=True` disables setattr but the default `__hash__` is dropped
+        # whenever `__eq__` is auto-generated. We disable __eq__ (eq=False)
+        # because `embeddings: dict` and `metadata: dict` are unhashable, then
+        # restore a content hash from the integrity fields.
+        return hash((self.model_id, self.checkpoint_hash, self.timestamp,
+                     self.anchor_set_version, self.tower_count, self.tower_names))
 
     def __post_init__(self):
         """Validate snapshot consistency."""
@@ -119,10 +127,13 @@ class Snapshot:
             "anchor_set_version": self.anchor_set_version,
             "tower_count": self.tower_count,
             "tower_names": list(self.tower_names),
-            "cross_tower_alignment": {
-                f"{k[0]}__{k[1]}": v
+            # Store as a list of [tower_a, tower_b, value] triples to avoid the
+            # "tower-name contains __" ambiguity in the legacy `a__b` key form.
+            # The legacy form is still accepted on load.
+            "cross_tower_alignment": [
+                [k[0], k[1], v]
                 for k, v in (self.cross_tower_alignment or {}).items()
-            },
+            ],
             "metadata": self.metadata,
         }
 
@@ -155,13 +166,35 @@ class Snapshot:
             with safe_open(tensor_path, framework="np") as f:
                 embeddings[tower_name] = f.get_tensor(tower_name)
 
-        # Reconstruct cross_tower_alignment
-        cta_raw = metadata.get("cross_tower_alignment", {})
-        cross_tower_alignment = None
+        # Reconstruct cross_tower_alignment. The on-disk shape may be either
+        # the new triple-list form (preferred) or the legacy "a__b" dict form.
+        cta_raw = metadata.get("cross_tower_alignment")
+        cross_tower_alignment: dict[tuple[str, str], float] | None = None
         if cta_raw:
-            cross_tower_alignment = {
-                tuple(k.split("__")): v for k, v in cta_raw.items()
-            }
+            cross_tower_alignment = {}
+            if isinstance(cta_raw, list):
+                for entry in cta_raw:
+                    if len(entry) != 3:
+                        raise SnapshotCorruptionError(
+                            f"Malformed cross_tower_alignment entry: {entry!r}"
+                        )
+                    a, b, v = entry
+                    cross_tower_alignment[(a, b)] = v
+            elif isinstance(cta_raw, dict):
+                # Legacy "a__b" form. Best-effort split; ambiguous when names
+                # contain "__" themselves.
+                for k, v in cta_raw.items():
+                    parts = k.split("__", 1)
+                    if len(parts) != 2:
+                        raise SnapshotCorruptionError(
+                            f"Malformed cross_tower_alignment key: {k!r}"
+                        )
+                    cross_tower_alignment[(parts[0], parts[1])] = v
+            else:
+                raise SnapshotCorruptionError(
+                    f"cross_tower_alignment must be list or dict, got "
+                    f"{type(cta_raw).__name__}"
+                )
 
         # Integrity check (if embeddings_hash is present)
         if "embeddings_hash" in metadata:
