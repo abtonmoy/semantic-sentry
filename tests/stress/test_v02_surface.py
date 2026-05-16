@@ -21,7 +21,6 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
