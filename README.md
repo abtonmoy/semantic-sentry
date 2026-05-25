@@ -162,6 +162,34 @@ monitor = DriftMonitor(
   torch backend directly from the encoded tensors, skipping the numpy/snapshot
   round-trip — cheapest when tracking every N steps on GPU.
 
+### Per-step tracking
+
+The callbacks default to tracking at the trainer's eval/save events. For
+fine-grained, per-step cadence, set `every_n_steps` (the callback then hooks
+`on_step_end` / `on_train_batch_end`):
+
+```python
+monitor = DriftMonitor(async_mode=True, max_inflight=1, keep_on_device=False)
+cb = SemanticSentryCallback(small_anchor_set, adapter=adapter, monitor=monitor,
+                            every_n_steps=50)   # 1 = literally every step
+```
+
+Each measurement re-encodes the anchor set through the current weights — a
+forward pass that runs on the training thread (it must observe the live
+weights). To keep that off the critical path:
+
+- **`every_n_steps`** sets the stride — the main cost lever.
+- a **small anchor set** (encode cost scales with anchor count).
+- **`async_mode` + `max_inflight=1`** run the metric math + logging on a
+  worker and *drop* a measurement when the worker is still busy, so a slow
+  step can never throttle training or backlog the queue.
+- **`probe_eval_mode=True`** (default) flips the model to `eval()` for the
+  probe and restores train mode — without it, per-step measurements pick up
+  dropout/batchnorm noise.
+
+Per-step deltas are small and noisy; lean on the temporal velocity/plateau
+signals (`track_temporal=True`) rather than reading individual points.
+
 ### Framework callbacks
 
 Drop a callback into your trainer and drift is tracked automatically, with

@@ -66,8 +66,13 @@ class SemanticSentryCallback(_HFTrainerCallback):
             ``DriftMonitor(baseline_mode="previous", track_temporal=True,
             async_mode=True)``.
         evaluators: Optional downstream evaluators (see `DriftMonitor.track`).
-        on_event: Which trainer hook fires tracking — ``"evaluate"`` (default)
-            or ``"save"``.
+        on_event: Which trainer hook fires tracking when ``every_n_steps`` is
+            0 — ``"evaluate"`` (default) or ``"save"``.
+        every_n_steps: When > 0, track on ``on_step_end`` every N optimizer
+            steps instead of at eval/save events — fine-grained, per-step
+            cadence. Pair with a monitor built with ``keep_on_device``/
+            ``async_mode``/``max_inflight`` and a small anchor set to keep the
+            overhead off the critical path. ``1`` means literally every step.
         stop_on_plateau: When True, set ``control.should_training_stop`` once
             the temporal plateau signal fires (requires a monitor built with
             ``track_temporal=True``).
@@ -81,6 +86,7 @@ class SemanticSentryCallback(_HFTrainerCallback):
         monitor: DriftMonitor | None = None,
         evaluators: list[Any] | dict[str, Any] | None = None,
         on_event: str = "evaluate",
+        every_n_steps: int = 0,
         stop_on_plateau: bool = False,
     ) -> None:
         if not _HAS_HF:
@@ -90,12 +96,15 @@ class SemanticSentryCallback(_HFTrainerCallback):
             )
         if on_event not in ("evaluate", "save"):
             raise ValueError(f"on_event must be 'evaluate' or 'save', got {on_event!r}")
+        if every_n_steps < 0:
+            raise ValueError(f"every_n_steps must be >= 0, got {every_n_steps}")
         self.anchor_set = anchor_set
         self.adapter = adapter
         self.logger = logger
         self.monitor = monitor or DriftMonitor()
         self.evaluators = evaluators
         self.on_event = on_event
+        self.every_n_steps = every_n_steps
         self.stop_on_plateau = stop_on_plateau
         self.last_comparison: Any | None = None
 
@@ -119,9 +128,20 @@ class SemanticSentryCallback(_HFTrainerCallback):
             self.last_comparison = comparison
         return _plateau_reached(comparison) if self.stop_on_plateau else False
 
+    def on_step_end(self, args, state, control, **kwargs):  # noqa: ANN001
+        """Track drift every ``every_n_steps`` optimizer steps (per-step mode)."""
+        if self.every_n_steps > 0:
+            step = getattr(state, "global_step", 0) or 0
+            if (step % self.every_n_steps == 0
+                    and self._track(state, kwargs.get("model"))
+                    and control is not None):
+                control.should_training_stop = True
+        return control
+
     def on_evaluate(self, args, state, control, **kwargs):  # noqa: ANN001
-        """Track drift after each evaluation phase."""
-        if (self.on_event == "evaluate"
+        """Track drift after each evaluation phase (when not in per-step mode)."""
+        if (self.every_n_steps == 0
+                and self.on_event == "evaluate"
                 and self._track(state, kwargs.get("model"))
                 and control is not None):
             control.should_training_stop = True
@@ -129,7 +149,8 @@ class SemanticSentryCallback(_HFTrainerCallback):
 
     def on_save(self, args, state, control, **kwargs):  # noqa: ANN001
         """Track drift after each checkpoint save (when on_event='save')."""
-        if (self.on_event == "save"
+        if (self.every_n_steps == 0
+                and self.on_event == "save"
                 and self._track(state, kwargs.get("model"))
                 and control is not None):
             control.should_training_stop = True
@@ -168,6 +189,8 @@ class SemanticSentryLightningCallback(_LightningCallback):
         monitor: Optional pre-built `DriftMonitor` (configure live behaviour
             there, as for the HF callback).
         evaluators: Optional downstream evaluators.
+        every_n_steps: When > 0, track on ``on_train_batch_end`` every N steps
+            (per-step cadence) instead of at validation end.
         stop_on_plateau: When True, set ``trainer.should_stop`` once the
             temporal plateau signal fires.
     """
@@ -179,6 +202,7 @@ class SemanticSentryLightningCallback(_LightningCallback):
         logger: DriftLogger | None = None,
         monitor: DriftMonitor | None = None,
         evaluators: list[Any] | dict[str, Any] | None = None,
+        every_n_steps: int = 0,
         stop_on_plateau: bool = False,
     ) -> None:
         if not _HAS_LIGHTNING:
@@ -186,16 +210,18 @@ class SemanticSentryLightningCallback(_LightningCallback):
                 "SemanticSentryLightningCallback requires 'lightning' or "
                 "'pytorch-lightning'"
             )
+        if every_n_steps < 0:
+            raise ValueError(f"every_n_steps must be >= 0, got {every_n_steps}")
         self.anchor_set = anchor_set
         self.adapter = adapter
         self.logger = logger
         self.monitor = monitor or DriftMonitor()
         self.evaluators = evaluators
+        self.every_n_steps = every_n_steps
         self.stop_on_plateau = stop_on_plateau
         self.last_comparison: Any | None = None
 
-    def on_validation_end(self, trainer, pl_module):  # noqa: ANN001
-        """Track drift against the rolling baseline."""
+    def _track(self, trainer, pl_module) -> None:
         step = getattr(trainer, "global_step", None)
         result = self.monitor.track(
             pl_module,
@@ -210,3 +236,15 @@ class SemanticSentryLightningCallback(_LightningCallback):
             self.last_comparison = comparison
         if self.stop_on_plateau and _plateau_reached(comparison):
             trainer.should_stop = True
+
+    def on_train_batch_end(self, trainer, pl_module, *args, **kwargs):  # noqa: ANN001
+        """Track drift every ``every_n_steps`` steps (per-step mode)."""
+        if self.every_n_steps > 0:
+            step = getattr(trainer, "global_step", 0) or 0
+            if step % self.every_n_steps == 0:
+                self._track(trainer, pl_module)
+
+    def on_validation_end(self, trainer, pl_module):  # noqa: ANN001
+        """Track drift at validation end (when not in per-step mode)."""
+        if self.every_n_steps == 0:
+            self._track(trainer, pl_module)

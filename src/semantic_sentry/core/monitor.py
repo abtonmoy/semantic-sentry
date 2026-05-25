@@ -69,6 +69,7 @@ class DriftMonitor:
         plateau_k: int = 3,
         history_limit: int = 64,
         async_mode: bool = False,
+        max_inflight: int = 0,
     ):
         """Initialize the drift monitor.
 
@@ -96,6 +97,11 @@ class DriftMonitor:
                 but runs the metric computation + logging on a background
                 worker and returns a `concurrent.futures.Future`. Call
                 `drain()` / `close()` to flush pending work.
+            max_inflight: Async backpressure for high-frequency (per-step)
+                tracking. When > 0, `track()` returns ``None`` (skips the
+                measurement, including the encode) if this many jobs are
+                already in flight, so a slow worker can't backlog the queue or
+                throttle training. ``0`` (default) means unbounded.
         """
         if baseline_mode not in ("fixed", "previous"):
             raise ValueError(
@@ -126,6 +132,7 @@ class DriftMonitor:
         self._history_times: list[float] = []
         # --- async plumbing (C) ---
         self._async_mode = async_mode
+        self._max_inflight = max_inflight
         self._executor: ThreadPoolExecutor | None = None
         self._pending: list[Future] = []
         self._last_result: Comparison | None = None
@@ -681,6 +688,7 @@ class DriftMonitor:
         calibration: "SeverityCalibration | None" = None,
         evaluators: "list[Any] | dict[str, Any] | None" = None,
         keep_on_device: bool = False,
+        probe_eval_mode: bool = True,
     ) -> "Comparison | Future | None":
         """One-line drift tracking against a rolling baseline.
 
@@ -723,37 +731,61 @@ class DriftMonitor:
                 directly from the encoded tensors, skipping the snapshot/numpy
                 round-trip. Global metrics only — no per-tower / behavioral /
                 downstream / temporal.
+            probe_eval_mode: Switch the model to ``eval()`` for the anchor
+                encode and restore its previous mode afterwards. Important for
+                per-step tracking, where the model is otherwise in train mode
+                (dropout / batchnorm active) and would add noise to the
+                geometry. No-op for models without ``train()``/``eval()``.
 
         Returns:
-            ``None`` on the baseline-setting call; a `Comparison` in sync mode;
-            a `Future[Comparison]` in async mode.
+            ``None`` on the baseline-setting (or async-skipped) call; a
+            `Comparison` in sync mode; a `Future[Comparison]` in async mode.
 
         Raises:
             AnchorSetMismatchError: If the anchor set differs from the baseline.
         """
-        if keep_on_device:
-            return self._track_on_device(
-                model, anchor_set, step=step, adapter=adapter,
-                logger=logger, calibration=calibration,
+        # Async backpressure: skip entirely (including the encode) when the
+        # worker is saturated, so high-frequency tracking can't throttle the
+        # training loop or backlog the queue.
+        if self._async_mode and self._max_inflight > 0:
+            with self._async_lock:
+                saturated = len(self._pending) >= self._max_inflight
+            if saturated:
+                return None
+
+        was_training = bool(getattr(model, "training", False))
+        if probe_eval_mode and was_training and hasattr(model, "eval"):
+            model.eval()
+        try:
+            if keep_on_device:
+                return self._track_on_device(
+                    model, anchor_set, step=step, adapter=adapter,
+                    logger=logger, calibration=calibration,
+                )
+
+            current = self.snapshot(model, anchor_set, adapter=adapter)
+            t = float(step) if step is not None else float(len(self._history))
+
+            reference = self._select_reference(current)
+            self._append_history(current, t)
+            if reference is None:
+                # Establishing call — nothing to compare against yet.
+                self._baseline_anchor_version = current.anchor_set_version
+                return None
+
+            args = (
+                reference, current, list(self._history), list(self._history_times),
+                calibration, anchor_set, evaluators, logger, step,
             )
-
-        current = self.snapshot(model, anchor_set, adapter=adapter)
-        t = float(step) if step is not None else float(len(self._history))
-
-        reference = self._select_reference(current)
-        self._append_history(current, t)
-        if reference is None:
-            # Establishing call — nothing to compare against yet.
-            self._baseline_anchor_version = current.anchor_set_version
-            return None
-
-        args = (
-            reference, current, list(self._history), list(self._history_times),
-            calibration, anchor_set, evaluators, logger, step,
-        )
-        if self._async_mode:
-            return self._submit(self._finalize, *args)
-        return self._finalize(*args)
+            if self._async_mode:
+                return self._submit(self._finalize, *args)
+            return self._finalize(*args)
+        finally:
+            # Restore train mode after the (synchronous) encode. In async mode
+            # the worker only does metric math — it never touches the model —
+            # so restoring here is safe.
+            if probe_eval_mode and was_training and hasattr(model, "train"):
+                model.train()
 
     def _track_on_device(
         self,
@@ -831,6 +863,12 @@ class DriftMonitor:
         """Most recently completed `track()` comparison (useful in async mode)."""
         with self._async_lock:
             return self._last_result
+
+    @property
+    def is_busy(self) -> bool:
+        """True if the async worker has at least one job in flight."""
+        with self._async_lock:
+            return len(self._pending) > 0
 
     def drain(self, timeout: float | None = None) -> None:
         """Block until all pending async `track()` jobs have finished."""
