@@ -2,7 +2,8 @@
 
 import hashlib
 import warnings
-from dataclasses import dataclass, field
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -57,13 +58,79 @@ class DriftMonitor:
         comparison = monitor.compare(snapshot_v0, snapshot_v1)
     """
 
-    def __init__(self):
-        """Initialize the drift monitor."""
+    def __init__(
+        self,
+        *,
+        baseline_mode: str = "fixed",
+        track_temporal: bool = False,
+        temporal_metric: str = "cka",
+        plateau_eps: float = 0.005,
+        plateau_delta: float = 0.001,
+        plateau_k: int = 3,
+        history_limit: int = 64,
+        async_mode: bool = False,
+    ):
+        """Initialize the drift monitor.
+
+        The keyword-only args configure `track()`'s live-monitoring behaviour;
+        all default to the original behaviour, so ``DriftMonitor()`` is
+        unchanged.
+
+        Args:
+            baseline_mode: ``"fixed"`` (default) compares every checkpoint to
+                the first one seen — "drift since monitoring started".
+                ``"previous"`` compares each checkpoint to the immediately
+                preceding one — a sliding-window / step-to-step view.
+            track_temporal: When True, `track()` accumulates a bounded window
+                of snapshots and reports velocity / acceleration / plateau of
+                ``temporal_metric`` under ``Comparison.metadata["temporal"]``.
+            temporal_metric: Which registered metric the temporal signals wrap
+                (default ``"cka"``).
+            plateau_eps: Velocity threshold for the plateau detector.
+            plateau_delta: Acceleration threshold for the plateau detector.
+            plateau_k: Consecutive checkpoints required to declare a plateau.
+            history_limit: Max snapshots retained for temporal signals (the
+                pinned baseline is kept separately and is never trimmed).
+            async_mode: When True, `track()` captures the current embeddings
+                synchronously (it must, before training mutates the weights)
+                but runs the metric computation + logging on a background
+                worker and returns a `concurrent.futures.Future`. Call
+                `drain()` / `close()` to flush pending work.
+        """
+        if baseline_mode not in ("fixed", "previous"):
+            raise ValueError(
+                f"baseline_mode must be 'fixed' or 'previous', got {baseline_mode!r}"
+            )
         self._metric_registry = get_metric_registry()
         self._last_comparison: Comparison | None = None
         self._last_anchor_set: AnchorSet | None = None
         self._last_v0_embeddings: dict[str, np.ndarray] | None = None
         self._last_v1_embeddings: dict[str, np.ndarray] | None = None
+        # Rolling baseline for `track()`. The first `track()` call (or an
+        # explicit `set_baseline()`) records the reference snapshot; every
+        # subsequent call compares the current model against it. Kept separate
+        # from the `_last_*` compare()/classify() state so interleaving the two
+        # APIs on one monitor doesn't cross-contaminate.
+        self._baseline_snapshot: Snapshot | None = None
+        self._baseline_device_embeddings: dict[str, Any] | None = None
+        self._baseline_anchor_version: str = ""
+        # --- live-tracking config (A: baseline mode, B: temporal) ---
+        self._baseline_mode = baseline_mode
+        self._track_temporal = track_temporal
+        self._temporal_metric = temporal_metric
+        self._plateau_eps = plateau_eps
+        self._plateau_delta = plateau_delta
+        self._plateau_k = plateau_k
+        self._history_limit = max(2, history_limit)
+        self._history: list[Snapshot] = []
+        self._history_times: list[float] = []
+        # --- async plumbing (C) ---
+        self._async_mode = async_mode
+        self._executor: ThreadPoolExecutor | None = None
+        self._pending: list[Future] = []
+        self._last_result: Comparison | None = None
+        import threading
+        self._async_lock = threading.Lock()
         # Per-anchor NPS, computed once at compare() time and reused by every
         # subsequent classify() call. Eliminates the O(n²)-per-input cost
         # that the v0.1.0 audit flagged (improvement.md item 2).
@@ -153,6 +220,8 @@ class DriftMonitor:
         d_snapshot_v0: Snapshot | None = None,
         d_snapshot_v1: Snapshot | None = None,
         calibration: "SeverityCalibration | None" = None,
+        anchor_set: AnchorSet | None = None,
+        evaluators: "list[Any] | dict[str, Any] | None" = None,
     ) -> Comparison:
         """Compare two snapshots and compute drift metrics.
 
@@ -289,6 +358,18 @@ class DriftMonitor:
         if v0_tag:
             comparison_metadata["distribution_tag"] = v0_tag
 
+        # Downstream proxy deltas: when labelled anchors + evaluators are
+        # supplied, run each evaluator's v0->v1 delta and stash it under
+        # comparison.metadata["downstream"]. This surfaces a *measured* task
+        # signal (e.g. retrieval MRR change) alongside the purely geometric
+        # metrics, which the README is explicit about not predicting.
+        if evaluators is not None and anchor_set is not None:
+            downstream = self._compute_downstream(
+                snapshot_v0, snapshot_v1, anchor_set, evaluators
+            )
+            if downstream:
+                comparison_metadata["downstream"] = downstream
+
         # I2: pass calibration-derived thresholds (if any) into Comparison so
         # severity is computed against the noise-floor bands instead of the
         # hard-coded defaults.
@@ -421,6 +502,349 @@ class DriftMonitor:
             return model.__class__.__name__
         else:
             return "unknown_model"
+
+    def _compute_downstream(
+        self,
+        snapshot_v0: Snapshot,
+        snapshot_v1: Snapshot,
+        anchor_set: AnchorSet,
+        evaluators: "list[Any] | dict[str, Any]",
+    ) -> dict[str, float]:
+        """Run each evaluator's v0->v1 delta. Skips silently if unlabelled.
+
+        Accepts either a list of `Evaluator` instances (keyed by class name)
+        or a ``{name: Evaluator}`` dict. Evaluators that raise (e.g. because
+        the anchor set has no labels) are skipped rather than failing the
+        whole comparison.
+        """
+        if isinstance(evaluators, dict):
+            items = list(evaluators.items())
+        else:
+            items = [(type(ev).__name__, ev) for ev in evaluators]
+
+        deltas: dict[str, float] = {}
+        for name, evaluator in items:
+            try:
+                deltas[name] = float(
+                    evaluator.evaluate_delta(snapshot_v0, snapshot_v1, anchor_set)
+                )
+            except Exception as exc:  # noqa: BLE001 - one bad evaluator shouldn't abort
+                warnings.warn(
+                    f"Evaluator {name!r} failed and was skipped: {exc}",
+                    stacklevel=3,
+                )
+        return deltas
+
+    def set_baseline(
+        self,
+        model: Any,
+        anchor_set: AnchorSet,
+        adapter: EncoderAdapter | None = None,
+    ) -> Snapshot:
+        """Record the reference snapshot that `track()` compares against.
+
+        Usually you don't need to call this — the first `track()` call sets
+        the baseline automatically. Use it to pin a specific known-good
+        checkpoint as the reference up front.
+
+        Returns:
+            The captured baseline `Snapshot`.
+        """
+        baseline = self.snapshot(model, anchor_set, adapter=adapter)
+        self._baseline_snapshot = baseline
+        self._baseline_anchor_version = baseline.anchor_set_version
+        self._baseline_device_embeddings = None
+        self._history = [baseline]
+        self._history_times = [0.0]
+        return baseline
+
+    # --- live-tracking internals (A/B/C) ------------------------------------
+
+    def _select_reference(self, current: Snapshot) -> Snapshot | None:
+        """Pick what ``current`` is compared against, honouring baseline_mode.
+
+        Returns ``None`` on the establishing call (nothing to compare yet).
+        Must be called *before* ``current`` is appended to the history window
+        so ``"previous"`` mode sees the prior snapshot, not ``current`` itself.
+        """
+        if self._baseline_mode == "fixed":
+            if self._baseline_snapshot is None:
+                self._baseline_snapshot = current
+                return None
+            return self._baseline_snapshot
+        # "previous": sliding-window — compare against the immediately prior.
+        return self._history[-1] if self._history else None
+
+    def _append_history(self, snap: Snapshot, t: float) -> None:
+        """Append to the bounded temporal-history window (drops the oldest)."""
+        self._history.append(snap)
+        self._history_times.append(t)
+        if len(self._history) > self._history_limit:
+            self._history.pop(0)
+            self._history_times.pop(0)
+
+    def _compute_temporal(
+        self,
+        history: list[Snapshot],
+        times: list[float],
+    ) -> dict[str, Any]:
+        """Velocity / acceleration / plateau of the latest checkpoint.
+
+        Returns ``{}`` when temporal tracking is off or there isn't enough
+        history yet. Operates on the supplied (copied) lists so it is safe to
+        run on the async worker thread.
+        """
+        if not self._track_temporal or len(history) < 2:
+            return {}
+        from semantic_sentry.metrics.temporal import (
+            acceleration,
+            plateau,
+            velocity,
+        )
+        try:
+            v = velocity(history, times, self._temporal_metric)
+            a = acceleration(history, times, self._temporal_metric)
+            p = plateau(
+                history, times, self._temporal_metric,
+                eps=self._plateau_eps, delta=self._plateau_delta, k=self._plateau_k,
+            )
+        except Exception as exc:  # noqa: BLE001 - temporal is best-effort
+            warnings.warn(f"temporal signals skipped: {exc}", stacklevel=3)
+            return {}
+        return {
+            "metric": self._temporal_metric,
+            "velocity": float(v[-1]),
+            "acceleration": float(a[-1]),
+            "plateau": bool(p[-1]),
+        }
+
+    def _ensure_executor(self) -> ThreadPoolExecutor:
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="semantic-sentry"
+            )
+        return self._executor
+
+    def _submit(self, fn: Any, *args: Any) -> Future:
+        """Submit ``fn(*args)`` to the single background worker (async mode)."""
+        fut = self._ensure_executor().submit(fn, *args)
+        with self._async_lock:
+            self._pending.append(fut)
+        fut.add_done_callback(self._on_future_done)
+        return fut
+
+    def _on_future_done(self, fut: Future) -> None:
+        with self._async_lock:
+            if fut in self._pending:
+                self._pending.remove(fut)
+
+    def _finalize(
+        self,
+        reference: Snapshot,
+        current: Snapshot,
+        history: list[Snapshot],
+        times: list[float],
+        calibration: "SeverityCalibration | None",
+        anchor_set: AnchorSet,
+        evaluators: "list[Any] | dict[str, Any] | None",
+        logger: Any | None,
+        step: int | None,
+    ) -> Comparison:
+        """Compare + temporal + log. Runs inline (sync) or on the worker (async)."""
+        comparison = self.compare(
+            reference,
+            current,
+            calibration=calibration,
+            anchor_set=anchor_set if evaluators is not None else None,
+            evaluators=evaluators,
+        )
+        temporal = self._compute_temporal(history, times)
+        if temporal:
+            comparison = replace(
+                comparison,
+                metadata={**comparison.metadata, "temporal": temporal},
+            )
+        if logger is not None:
+            logger.log_comparison(comparison, step=step)
+        with self._async_lock:
+            self._last_result = comparison
+        return comparison
+
+    def track(
+        self,
+        model: Any,
+        anchor_set: AnchorSet,
+        *,
+        step: int | None = None,
+        adapter: EncoderAdapter | None = None,
+        logger: Any | None = None,
+        calibration: "SeverityCalibration | None" = None,
+        evaluators: "list[Any] | dict[str, Any] | None" = None,
+        keep_on_device: bool = False,
+    ) -> "Comparison | Future | None":
+        """One-line drift tracking against a rolling baseline.
+
+        The first call records the baseline and returns ``None``. Every
+        subsequent call snapshots the current model, compares it to the
+        reference (per ``baseline_mode``), optionally logs, and returns the
+        `Comparison`. Designed to drop into a training loop or callback:
+
+            monitor = DriftMonitor(track_temporal=True)
+            for step, ckpt in enumerate(checkpoints):
+                cmp = monitor.track(ckpt, anchors, step=step, logger=wandb_logger)
+                if cmp and cmp.metadata.get("temporal", {}).get("plateau"):
+                    break  # geometry has settled — stop early
+
+        Behaviour is governed by the monitor's constructor config:
+
+        - **baseline_mode="fixed"** — compare to the first snapshot
+          (drift since start); **"previous"** — compare to the prior
+          checkpoint (sliding window).
+        - **track_temporal=True** — attach velocity / acceleration / plateau
+          under ``comparison.metadata["temporal"]``.
+        - **async_mode=True** — return a `Future`; embeddings are captured
+          synchronously (before the weights move on) but the metric
+          computation + logging run on a background worker. Use `drain()` /
+          `close()` to flush, and `last_result` for the latest completed
+          comparison.
+
+        Args:
+            model: Current model/checkpoint to evaluate.
+            anchor_set: Fixed anchor set (must match the baseline's).
+            step: Optional step/epoch; used as the temporal time axis and
+                forwarded to ``logger.log_comparison``.
+            adapter: Optional adapter (auto-detected if omitted).
+            logger: Optional `DriftLogger`; ``log_comparison`` is called when
+                a comparison is produced.
+            calibration: Optional `SeverityCalibration` for noise-floor bands.
+            evaluators: Optional downstream evaluators (see `compare`). Ignored
+                in ``keep_on_device`` mode (evaluators need numpy snapshots).
+            keep_on_device: Compute the built-in metrics with the torch backend
+                directly from the encoded tensors, skipping the snapshot/numpy
+                round-trip. Global metrics only — no per-tower / behavioral /
+                downstream / temporal.
+
+        Returns:
+            ``None`` on the baseline-setting call; a `Comparison` in sync mode;
+            a `Future[Comparison]` in async mode.
+
+        Raises:
+            AnchorSetMismatchError: If the anchor set differs from the baseline.
+        """
+        if keep_on_device:
+            return self._track_on_device(
+                model, anchor_set, step=step, adapter=adapter,
+                logger=logger, calibration=calibration,
+            )
+
+        current = self.snapshot(model, anchor_set, adapter=adapter)
+        t = float(step) if step is not None else float(len(self._history))
+
+        reference = self._select_reference(current)
+        self._append_history(current, t)
+        if reference is None:
+            # Establishing call — nothing to compare against yet.
+            self._baseline_anchor_version = current.anchor_set_version
+            return None
+
+        args = (
+            reference, current, list(self._history), list(self._history_times),
+            calibration, anchor_set, evaluators, logger, step,
+        )
+        if self._async_mode:
+            return self._submit(self._finalize, *args)
+        return self._finalize(*args)
+
+    def _track_on_device(
+        self,
+        model: Any,
+        anchor_set: AnchorSet,
+        *,
+        step: int | None,
+        adapter: EncoderAdapter | None,
+        logger: Any | None,
+        calibration: "SeverityCalibration | None",
+    ) -> "Comparison | Future | None":
+        """`track(keep_on_device=True)` — torch metrics, no numpy round-trip.
+
+        Honours ``baseline_mode`` (``"previous"`` rolls the device baseline
+        forward each call) and ``async_mode`` (the torch metric computation +
+        logging are deferred to the worker; the embedding capture stays
+        synchronous because it must observe the current weights). Temporal
+        signals are not available on this path — there are no `Snapshot`s.
+        """
+        from semantic_sentry.metrics.torch_backend import compute_drift_metrics_torch
+
+        if adapter is None:
+            adapter = detect_adapter(model)
+
+        # encode() returns on-device tensors; we never call encode_numpy here.
+        tensors = adapter.encode(anchor_set.inputs)
+        tower_names = adapter.list_towers()
+        import torch
+        current = torch.cat([tensors[name] for name in tower_names], dim=1).detach()
+        current_hash = self._compute_checkpoint_hash(model)
+
+        if self._baseline_device_embeddings is None:
+            self._baseline_device_embeddings = {"global": current}
+            self._baseline_anchor_version = anchor_set.version_hash
+            self._baseline_snapshot = None
+            return None
+
+        if self._baseline_anchor_version != anchor_set.version_hash:
+            raise AnchorSetMismatchError(
+                f"track() anchor set changed under the baseline: "
+                f"{self._baseline_anchor_version} vs {anchor_set.version_hash}"
+            )
+
+        base = self._baseline_device_embeddings["global"]
+        tag = anchor_set.distribution_tag
+        thresholds_arg = dict(calibration.thresholds) if calibration is not None else {}
+        # "previous" mode: the next call compares against this checkpoint.
+        if self._baseline_mode == "previous":
+            self._baseline_device_embeddings = {"global": current}
+
+        def _compute() -> Comparison:
+            global_metrics = compute_drift_metrics_torch(base, current)
+            metadata: dict[str, Any] = {"backend": "torch", "keep_on_device": True}
+            if tag:
+                metadata["distribution_tag"] = tag
+            comparison = Comparison(
+                snapshot_v0_hash="device-baseline",
+                snapshot_v1_hash=current_hash,
+                global_metrics=global_metrics,
+                thresholds=thresholds_arg,
+                metadata=metadata,
+            )
+            if logger is not None:
+                logger.log_comparison(comparison, step=step)
+            with self._async_lock:
+                self._last_result = comparison
+            return comparison
+
+        if self._async_mode:
+            return self._submit(_compute)
+        return _compute()
+
+    @property
+    def last_result(self) -> Comparison | None:
+        """Most recently completed `track()` comparison (useful in async mode)."""
+        with self._async_lock:
+            return self._last_result
+
+    def drain(self, timeout: float | None = None) -> None:
+        """Block until all pending async `track()` jobs have finished."""
+        with self._async_lock:
+            pending = list(self._pending)
+        for fut in pending:
+            fut.result(timeout=timeout)
+
+    def close(self) -> None:
+        """Flush pending async work and shut down the background worker."""
+        self.drain()
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
 
     def make_classification_context(self) -> ClassificationContext:
         """Bundle the data needed by `classify*()` into an explicit context.

@@ -1,0 +1,53 @@
+name: "SemanticSentry Drift Gate"
+description: >-
+  Compare two saved embedding snapshots and fail the job if geometric drift
+  crosses the configured thresholds.
+author: "Abdul Basit Tonmoy"
+branding:
+  icon: "activity"
+  color: "purple"
+
+inputs:
+  baseline:
+    description: "Path to the baseline snapshot directory."
+    required: true
+  candidate:
+    description: "Path to the candidate snapshot directory."
+    required: true
+  fail-under:
+    description: "Comma-separated METRIC=MIN floors (e.g. cka=0.9,nps=0.85)."
+    required: false
+    default: ""
+  fail-over:
+    description: "Comma-separated METRIC=MAX ceilings (e.g. isotropy_delta=0.05)."
+    required: false
+    default: ""
+  python-version:
+    description: "Python version to set up."
+    required: false
+    default: "3.11"
+  version:
+    description: "semantic-sentry version/spec to install (default: latest on PyPI)."
+    required: false
+    default: "semantic-sentry"
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install semantic-sentry
+      shell: bash
+      run: python -m pip install --upgrade "${{ inputs.version }}"
+    - name: Run drift gate
+      shell: bash
+      run: |
+        args=(gate "${{ inputs.baseline }}" "${{ inputs.candidate }}")
+        if [ -n "${{ inputs.fail-under }}" ]; then
+          args+=(--fail-under "${{ inputs.fail-under }}")
+        fi
+        if [ -n "${{ inputs.fail-over }}" ]; then
+          args+=(--fail-over "${{ inputs.fail-over }}")
+        fi
+        semantic-sentry "${args[@]}"

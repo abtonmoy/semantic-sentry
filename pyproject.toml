@@ -37,6 +37,9 @@ dev = [
 ]
 all = ["semantic-sentry[clip,sentence-transformers,onnx,wandb,mlflow,bench,dev]"]
 
+[project.scripts]
+semantic-sentry = "semantic_sentry.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

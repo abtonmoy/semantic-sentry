@@ -43,9 +43,19 @@ as a one-number health score.
 - **Multi-tower**: Supports dual-encoder and multi-modal models.
 - **Efficient**: FAISS-accelerated neighborhood search; metrics run
   in seconds on 1 000-passage anchors with 768-d embeddings.
-- **Integrations** *(scaffolded)*: stubs for Weights & Biases, MLflow,
-  and webhook hooks under `src/semantic_sentry/integrations/` — wire-up
-  to the metric pipeline is in progress, see `plan/improvement.md`.
+- **Drops into your training loop**: a one-line `monitor.track(model,
+  anchors, step=...)` plus ready-made `transformers.Trainer` and PyTorch
+  Lightning callbacks — drift gets measured against a rolling baseline at
+  every eval, with no changes to your training code.
+- **Integrations**: `WandbLogger` and `MLflowLogger` push every metric next
+  to your loss curves; `ConsoleLogger` for local runs. All under
+  `src/semantic_sentry/integrations/`.
+- **CLI + CI gate**: `semantic-sentry compare` / `gate` operate on saved
+  snapshots and return a nonzero exit code when drift crosses your
+  thresholds. Ships with a composite GitHub Action (`action.yml`).
+- **Downstream proxies**: optional `RetrievalEvaluator` / `ClassificationEvaluator`
+  report measured task deltas (MRR, kNN accuracy) alongside the geometric
+  metrics when your anchors are labelled.
 
 ## Quick start
 
@@ -113,6 +123,109 @@ nps_score = nps(Z_base, Z_new, k=10)
 
 Both `linear_cka` and `nps` are rotation- and permutation-invariant
 (verified in `tests/unit/test_cka.py` and `tests/unit/test_nps.py`).
+
+## Monitoring during training
+
+`DriftMonitor.track()` collapses the snapshot/compare dance into one call
+against a rolling baseline. The first call records the baseline; every
+later call returns a `Comparison`:
+
+```python
+monitor = DriftMonitor()
+for step, ckpt in enumerate(checkpoints):
+    cmp = monitor.track(ckpt, anchor_set, step=step, adapter=adapter)
+    if cmp and cmp.severity is AlertSeverity.CRITICAL:
+        break  # geometry moved too far — stop and investigate
+```
+
+The monitor's constructor configures how tracking behaves:
+
+```python
+monitor = DriftMonitor(
+    baseline_mode="previous",   # "fixed" (vs first ckpt) or "previous" (sliding window)
+    track_temporal=True,        # attach velocity / acceleration / plateau signals
+    plateau_k=3,                # plateau = settled for k consecutive checkpoints
+    async_mode=True,            # offload metric compute + logging to a worker thread
+)
+```
+
+- **`baseline_mode`** — `"fixed"` measures drift since monitoring started;
+  `"previous"` measures step-to-step change against the prior checkpoint.
+- **`track_temporal`** — each result carries
+  `comparison.metadata["temporal"]` with `velocity`, `acceleration`, and a
+  boolean `plateau` (the early-stopping signal: geometry has settled).
+- **`async_mode`** — embeddings are captured synchronously (before the
+  weights move on) but metrics + logging run off the training thread;
+  `track()` returns a `Future`. Call `monitor.drain()` / `monitor.close()`
+  to flush, and read `monitor.last_result` for the latest completed result.
+- **`keep_on_device=True`** (per-call) computes the built-in metrics with the
+  torch backend directly from the encoded tensors, skipping the numpy/snapshot
+  round-trip — cheapest when tracking every N steps on GPU.
+
+### Framework callbacks
+
+Drop a callback into your trainer and drift is tracked automatically, with
+optional logging to W&B / MLflow:
+
+```python
+from semantic_sentry.adapters.huggingface import HuggingFaceAdapter
+from semantic_sentry.integrations import SemanticSentryCallback, WandbLogger
+
+adapter = HuggingFaceAdapter(model, tokenizer)
+trainer = Trainer(
+    ...,
+    callbacks=[SemanticSentryCallback(anchor_set, adapter=adapter,
+                                      logger=WandbLogger())],
+)
+```
+
+To stop training automatically once the embedding geometry settles, pass a
+temporal monitor and `stop_on_plateau=True` (sets `control.should_training_stop`):
+
+```python
+monitor = DriftMonitor(track_temporal=True)
+cb = SemanticSentryCallback(anchor_set, adapter=adapter, monitor=monitor,
+                            stop_on_plateau=True)
+```
+
+A `SemanticSentryLightningCallback` (same options, sets `trainer.should_stop`)
+is available for PyTorch Lightning.
+
+### Downstream proxies
+
+When anchors are labelled, hand `track()` (or `compare()`) a list of
+evaluators to get measured task deltas reported under
+`comparison.metadata["downstream"]`:
+
+```python
+from semantic_sentry import RetrievalEvaluator
+cmp = monitor.track(model, anchor_set, evaluators=[RetrievalEvaluator(k=10)])
+print(cmp.metadata["downstream"])  # {"RetrievalEvaluator": -0.043}
+```
+
+## Command line
+
+The CLI operates on snapshots already saved with `Snapshot.save()`, so it
+runs anywhere (no model loading):
+
+```bash
+semantic-sentry info     snapshots/baseline
+semantic-sentry compare  snapshots/baseline snapshots/candidate
+# Exit code 1 if any threshold is violated — wire straight into CI:
+semantic-sentry gate     snapshots/baseline snapshots/candidate \
+    --fail-under cka=0.90,nps=0.85 --fail-over isotropy_delta=0.05
+```
+
+A composite GitHub Action wraps the gate (see `action.yml` and
+`.github/workflows/drift-gate.example.yml`):
+
+```yaml
+- uses: abtonmoy/semantic-sentry@main
+  with:
+    baseline: snapshots/baseline
+    candidate: snapshots/candidate
+    fail-under: cka=0.90,nps=0.85
+```
 
 ## Architecture
 

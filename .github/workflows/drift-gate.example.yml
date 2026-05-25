@@ -1,0 +1,29 @@
+# Example: gate a model update on embedding drift.
+#
+# Assumes a previous job (or a committed artifact) produced two snapshot
+# directories — a known-good baseline and the candidate under review — via
+# `Snapshot.save(...)`. Copy this into your own repo and adjust the paths.
+name: Drift Gate (example)
+
+on:
+  pull_request:
+    paths:
+      - "snapshots/**"
+
+jobs:
+  drift-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Replace with however your snapshots are produced/fetched.
+      - name: Fetch snapshots
+        run: echo "expecting snapshots/baseline and snapshots/candidate to exist"
+
+      - name: SemanticSentry drift gate
+        uses: abtonmoy/semantic-sentry@main
+        with:
+          baseline: snapshots/baseline
+          candidate: snapshots/candidate
+          fail-under: cka=0.90,nps=0.85
+          fail-over: isotropy_delta=0.05

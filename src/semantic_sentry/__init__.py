@@ -6,6 +6,12 @@ from semantic_sentry.core.classification import ClassificationResult, Confidence
 from semantic_sentry.core.comparison import AlertSeverity, Comparison
 from semantic_sentry.core.monitor import DriftMonitor
 from semantic_sentry.core.snapshot import Snapshot
+from semantic_sentry.evaluation import (
+    ClassificationEvaluator,
+    Evaluator,
+    EvaluatorRegistry,
+    RetrievalEvaluator,
+)
 from semantic_sentry.exceptions import (
     AdapterDetectionError,
     AnchorSetMismatchError,
@@ -36,4 +42,8 @@ __all__ = [
     "ClassificationResult",
     "ConfidenceLevel",
     "AnchorSet",
+    "Evaluator",
+    "EvaluatorRegistry",
+    "RetrievalEvaluator",
+    "ClassificationEvaluator",
 ]
