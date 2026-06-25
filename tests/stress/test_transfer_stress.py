@@ -147,7 +147,7 @@ class TestTransferStress:
         # reproduce the negative direction.
         all_negative = [-0.05 - i * 0.002 for i in range(5)]
         tf.fit(comparisons, all_negative)
-        for cmp, target in zip(comparisons, all_negative):
+        for cmp, target in zip(comparisons, all_negative, strict=True):
             pred = tf.predict(cmp)
             assert pred < 0.0, f"Negative-target prediction {pred} unexpectedly non-negative"
             assert abs(pred - target) < 1e-6
