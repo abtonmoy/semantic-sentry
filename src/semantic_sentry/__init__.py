@@ -1,6 +1,6 @@
 """SemanticSentry: Universal semantic drift detection for any embedding space."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from semantic_sentry.core.classification import ClassificationResult, ConfidenceLevel
 from semantic_sentry.core.comparison import AlertSeverity, Comparison

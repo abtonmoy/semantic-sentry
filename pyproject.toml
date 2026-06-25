@@ -1,6 +1,6 @@
 [project]
 name = "semantic-sentry"
-version = "0.1.0"
+version = "0.2.0"
 description = "Universal semantic drift detection for any embedding space"
 readme = "README.md"
 license = {text = "Apache-2.0"}

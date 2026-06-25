@@ -56,17 +56,44 @@ class TransferFunction(ABC):
 class LinearTransfer(TransferFunction):
     """Linear transfer function using OLS regression.
 
-    Features: [1-CKA, 1-NPS, |isotropy_delta|]
-    Target: Downstream task degradation
+    Features: ``[1-CKA, 1-NPS, |isotropy_delta|]``
+    Target: Downstream task delta (signed by default — see ``clip``).
 
-    Example:
+    Output domain (v0.2.0+):
+        Signed real numbers by default. The OLS fit accepts mixed-sign
+        calibration targets and ``predict()`` returns whatever the regression
+        actually produces — including negative values when the fine-tune
+        improved the downstream metric. Pass ``clip=True`` at construction to
+        opt into the legacy non-negative-degradation contract (output clamped
+        to ``[0, 1]``, fit-time validation rejects negative targets to keep
+        the two halves consistent).
+
+    The default flipped in v0.2.0. Prior to that release, ``predict()``
+    silently clipped to ``[0, 1]`` and the silent collapse destroyed both
+    magnitude and rank for any improvement-regime calibration. See
+    CHANGELOG.md for the discovery context.
+
+    Example (signed, default):
         transfer = LinearTransfer()
+        transfer.fit(calibration_comparisons, calibration_delta_ndcg)
+        predicted_delta = transfer.predict(comparison)  # may be negative
+
+    Example (opt-in legacy non-negative contract):
+        transfer = LinearTransfer(clip=True)
         transfer.fit(calibration_comparisons, calibration_degradations)
-        predicted_degradation = transfer.predict(comparison)
+        # fit() raises ValueError if any degradation < 0.
+        predicted_degradation = transfer.predict(comparison)  # in [0, 1]
     """
 
-    def __init__(self):
-        """Initialize linear transfer function."""
+    def __init__(self, *, clip: bool = False):
+        """Initialize linear transfer function.
+
+        Args:
+            clip: When True, ``predict()`` clamps its output to ``[0, 1]`` and
+                ``fit()`` rejects negative degradations. Default is False
+                (signed predictions, mixed-sign targets accepted).
+        """
+        self._clip = bool(clip)
         self.weights: np.ndarray | None = None
         self.bias: float = 0.0
         self._fitted = False
@@ -76,11 +103,18 @@ class LinearTransfer(TransferFunction):
         """Fit linear transfer function.
 
         Args:
-            comparisons: List of comparison results
-            degradations: List of measured degradations
+            comparisons: List of comparison results.
+            degradations: List of measured downstream-metric deltas. Signed by
+                default — negative values represent "the candidate improved
+                over the baseline" and are accepted. Only rejected when this
+                LinearTransfer was constructed with ``clip=True`` (the
+                non-negative-degradation opt-in contract), in which case
+                negative targets cannot be represented by the clipped
+                predictor and the fit aborts at the boundary.
 
         Raises:
-            ValueError: If input lengths don't match or too few samples
+            ValueError: If input lengths don't match, fewer than 3 samples,
+                or any degradation is negative *while* ``clip=True``.
         """
         if len(comparisons) != len(degradations):
             raise ValueError(
@@ -90,6 +124,26 @@ class LinearTransfer(TransferFunction):
 
         if len(comparisons) < 3:
             raise ValueError("Need at least 3 samples to fit transfer function")
+
+        # Only the opt-in non-negative contract (`clip=True`) needs fit-time
+        # validation — when predict() clamps to [0, 1], silently fitting
+        # signed targets would reproduce the v0.1.0 bug. Default (clip=False)
+        # accepts mixed-sign degradations and predict() returns whatever the
+        # signed regression actually produces.
+        if self._clip:
+            negatives = [(i, float(d)) for i, d in enumerate(degradations) if d < 0]
+            if negatives:
+                preview = ", ".join(f"degradations[{i}]={d:+.4f}" for i, d in negatives[:3])
+                raise ValueError(
+                    f"LinearTransfer(clip=True) requires non-negative degradations, "
+                    f"got {len(negatives)} negative value(s): {preview}"
+                    f"{' …' if len(negatives) > 3 else ''}. "
+                    f"Either drop `clip=True` (signed default — predictions can be "
+                    f"negative when the candidate improves the metric) or compute "
+                    f"degradation as `max(0, baseline - candidate)` / "
+                    f"`abs(baseline - candidate)` at the source. See "
+                    f"LinearTransfer.predict docstring and CHANGELOG v0.2.0."
+                )
 
         # Extract features from comparisons
         X = np.array([self._extract_features(c) for c in comparisons])
@@ -114,25 +168,36 @@ class LinearTransfer(TransferFunction):
             self.r_squared = 0.0
 
     def predict(self, comparison: Comparison) -> float:
-        """Predict downstream degradation.
+        """Predict downstream-metric delta.
+
+        Signed by default — returns the raw OLS prediction ``w · x + b``,
+        which may be negative (indicating the candidate is predicted to
+        *improve* the downstream metric relative to the baseline). Pass
+        ``clip=True`` at construction to clamp the output to ``[0, 1]``;
+        in that mode ``fit()`` also rejects negative calibration targets so
+        the two halves stay consistent.
 
         Args:
-            comparison: Comparison result
+            comparison: Comparison result.
 
         Returns:
-            Predicted degradation
+            Predicted delta — a signed real number, or in ``[0, 1]`` if
+            this LinearTransfer was constructed with ``clip=True``.
 
         Raises:
-            ValueError: If not fitted
+            ValueError: If not fitted.
         """
         if not self._fitted:
             raise ValueError("TransferFunction not fitted. Call fit() first.")
 
         features = self._extract_features(comparison)
-        prediction = self.weights @ features + self.bias
+        prediction = float(self.weights @ features + self.bias)
 
-        # Clamp to [0, 1]
-        return float(np.clip(prediction, 0.0, 1.0))
+        if self._clip:
+            # Opt-in legacy contract: non-negative degradation, clamped to
+            # the [0, 1] domain. Paired with the fit-time validation.
+            return float(np.clip(prediction, 0.0, 1.0))
+        return prediction
 
     # _extract_features is inherited from TransferFunction.
 

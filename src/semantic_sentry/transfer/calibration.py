@@ -24,6 +24,12 @@ class CalibrationProfile:
         n_samples: Number of calibration samples
         feature_names: Names of features used (defaults to the standard
             (1-cka, 1-nps, |isotropy_delta|) trio).
+        clip: Whether the source LinearTransfer was constructed with
+            ``clip=True`` (the non-negative-degradation contract — output
+            clamped to ``[0, 1]``, negative targets rejected at fit-time).
+            Persisted into the JSON so round-trips reconstruct the same
+            contract. Defaults to ``False`` so v0.1.0 profiles load as the
+            new signed default.
     """
     profile_name: str
     model_family: str
@@ -32,14 +38,21 @@ class CalibrationProfile:
     r_squared: float
     n_samples: int
     feature_names: list[str] = field(default_factory=lambda: list(TRANSFER_FEATURE_NAMES))
+    clip: bool = False
 
     def to_transfer_function(self) -> LinearTransfer:
         """Convert profile to fitted LinearTransfer.
 
+        The reconstructed transfer is constructed with the same ``clip``
+        contract as the source — i.e. round-tripping a ``clip=True``
+        transfer through a CalibrationProfile and back yields another
+        ``clip=True`` transfer, so neither half of the clamp-output /
+        reject-negative-input pair can silently drift across serialization.
+
         Returns:
             Fitted LinearTransfer instance
         """
-        transfer = LinearTransfer()
+        transfer = LinearTransfer(clip=self.clip)
         transfer.weights = np.array(self.weights)
         transfer.bias = self.bias
         transfer.r_squared = self.r_squared
@@ -63,6 +76,7 @@ class CalibrationProfile:
             "r_squared": self.r_squared,
             "n_samples": self.n_samples,
             "feature_names": self.feature_names,
+            "clip": self.clip,
         }
 
         with open(path, "w") as f:
@@ -76,7 +90,11 @@ class CalibrationProfile:
             path: File path to load from
 
         Returns:
-            Loaded CalibrationProfile
+            Loaded CalibrationProfile. v0.1.0 profiles that predate the
+            ``clip`` field load as ``clip=False`` (signed default) — under
+            the v0.1.0 implementation they were silently clamped at
+            predict-time regardless, so this is a behavioral upgrade for
+            legacy profiles, not a regression.
         """
         path = Path(path)
 
@@ -91,6 +109,7 @@ class CalibrationProfile:
             r_squared=data["r_squared"],
             n_samples=data["n_samples"],
             feature_names=data.get("feature_names", ["1-cka", "1-nps", "|isotropy_delta|"]),
+            clip=data.get("clip", False),
         )
 
     @classmethod
@@ -110,7 +129,9 @@ class CalibrationProfile:
             n_samples: Number of calibration samples
 
         Returns:
-            CalibrationProfile
+            CalibrationProfile carrying the source transfer's ``clip``
+            contract so round-trips preserve the clamp-output /
+            reject-negative-input pairing.
         """
         if not transfer._fitted:
             raise ValueError("Transfer function must be fitted")
@@ -122,6 +143,7 @@ class CalibrationProfile:
             bias=transfer.bias,
             r_squared=transfer.r_squared or 0.0,
             n_samples=n_samples,
+            clip=transfer._clip,
         )
 
 
